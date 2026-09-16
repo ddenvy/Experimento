@@ -4,12 +4,14 @@ import { useEffect, useState } from "react";
 import { api, type AuditEntryDto, type AuditIntegrityDto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { ShieldCheck, ShieldAlert, Loader2 } from "lucide-react";
+import { ShieldCheck, ShieldAlert, Loader2, Download } from "lucide-react";
 
 export default function AuditPage() {
   const [entries, setEntries] = useState<AuditEntryDto[]>([]);
   const [integrity, setIntegrity] = useState<AuditIntegrityDto | null>(null);
   const [verifying, setVerifying] = useState(false);
+  const [exporting, setExporting] = useState(false);
+  const [exportError, setExportError] = useState<string | null>(null);
 
   useEffect(() => {
     api.getAuditTrail().then(setEntries).catch(() => {});
@@ -26,15 +28,45 @@ export default function AuditPage() {
     }
   }
 
+  // Выгружает пакет аудита (ALCOA+ оценка, полный журнал, версии, прогоны, ревью).
+  async function exportPackage() {
+    setExporting(true);
+    setExportError(null);
+    try {
+      const markdown = await api.exportAuditPackage();
+      const blob = new Blob([markdown], { type: "text/markdown;charset=utf-8" });
+      const url = URL.createObjectURL(blob);
+      const a = document.createElement("a");
+      a.href = url;
+      a.download = `audit-export-${new Date().toISOString().slice(0, 19).replace(/[:T]/g, "-")}.md`;
+      document.body.appendChild(a);
+      a.click();
+      a.remove();
+      URL.revokeObjectURL(url);
+    } catch (e) {
+      setExportError(e instanceof Error ? e.message : "Failed to export audit package");
+    } finally {
+      setExporting(false);
+    }
+  }
+
   return (
     <div className="space-y-6">
       <div className="flex items-center justify-between">
         <h1 className="text-2xl font-bold">Audit Trail</h1>
-        <Button onClick={verify} disabled={verifying}>
-          {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
-          Verify integrity
-        </Button>
+        <div className="flex items-center gap-2">
+          <Button variant="outline" onClick={exportPackage} disabled={exporting} data-testid="export-audit">
+            {exporting ? <Loader2 className="h-4 w-4 animate-spin" /> : <Download className="h-4 w-4" />}
+            Export audit package
+          </Button>
+          <Button onClick={verify} disabled={verifying}>
+            {verifying ? <Loader2 className="h-4 w-4 animate-spin" /> : <ShieldCheck className="h-4 w-4" />}
+            Verify integrity
+          </Button>
+        </div>
       </div>
+
+      {exportError && <p className="text-sm text-destructive">{exportError}</p>}
 
       {integrity && (
         <Card className={integrity.isIntact ? "border-green-500" : "border-destructive"}>

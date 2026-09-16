@@ -1,4 +1,5 @@
 import { test, expect } from "@playwright/test";
+import { createHash } from "crypto";
 import { injectAuth, loginApi } from "./helpers";
 
 /**
@@ -467,6 +468,38 @@ test.describe("Authenticated workflow", () => {
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });
     await page.getByRole("button", { name: "Verify integrity" }).click();
     await expect(page.getByText("Audit chain is intact.")).toBeVisible({ timeout: 15000 });
+  });
+
+  test("audit export downloads a self-verifying ALCOA+ package", async ({ page }) => {
+    await page.goto("/audit");
+    await expect(page.getByRole("heading", { name: "Audit Trail" })).toBeVisible();
+
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("export-audit").click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/^audit-export-.*\.md$/);
+
+    const stream = await download.createReadStream();
+    const chunks: Buffer[] = [];
+    for await (const chunk of stream) chunks.push(chunk as Buffer);
+    const markdown = Buffer.concat(chunks).toString("utf-8");
+
+    expect(markdown).toContain("# Audit Export Package");
+    expect(markdown).toContain("## ALCOA+ Compliance Assessment");
+    expect(markdown).toContain("## Formulation Versions Inventory");
+    expect(markdown).toContain("## Full Audit Trail");
+    expect(markdown).toContain("| Attributable |");
+    expect(markdown).toContain("| Accurate |");
+
+    // Отпечаток документа обязан воспроизводиться по его же телу.
+    const marker = "**Document fingerprint (SHA-256):**";
+    const markerIndex = markdown.indexOf(marker);
+    expect(markerIndex).toBeGreaterThan(0);
+    const expected = createHash("sha256")
+      .update(Buffer.from(markdown.slice(0, markerIndex), "utf-8"))
+      .digest("hex");
+    const actual = markdown.slice(markerIndex + marker.length).match(/[0-9a-f]{64}/)?.[0];
+    expect(actual).toBe(expected);
   });
 
   test("knowledge base: index a document and find it via semantic search", async ({ page }) => {

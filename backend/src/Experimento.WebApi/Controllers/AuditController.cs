@@ -27,4 +27,18 @@ public class AuditController : BaseController
         var (isIntact, brokenId) = await Mediator.Send(new VerifyAuditIntegrityQuery());
         return Ok(new { isIntact, firstBrokenId = brokenId });
     }
+
+    /// <summary>
+    /// Выгружает пакет документов для аудита: оценка ALCOA+, полный журнал изменений,
+    /// инвентарь версий формуляций, прогоны и ревью-подписи одним Markdown-файлом.
+    /// </summary>
+    [HttpGet("export")]
+    public async Task<IActionResult> Export()
+    {
+        var markdown = await Mediator.Send(new GenerateAuditExportQuery());
+        // Само действие выгрузки тоже фиксируется в журнале.
+        await AuditAsync("Audit.Export", "AuditTrail", null);
+        var bytes = System.Text.Encoding.UTF8.GetBytes(markdown);
+        return File(bytes, "text/markdown; charset=utf-8", $"audit-export-{DateTime.UtcNow:yyyyMMdd-HHmmss}.md");
+    }
 }

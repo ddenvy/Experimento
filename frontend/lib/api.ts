@@ -614,4 +614,7 @@ export const api = {
       "/audit" + (entityType ? `?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId ?? "")}` : "")
     ),
   verifyAudit: () => request<AuditIntegrityDto>("/audit/verify"),
+  // Пакет аудита — Markdown-текст, не JSON.
+  exportAuditPackage: () =>
+    request<string>("/audit/export", {}, false, (res) => res.text()),
 };
