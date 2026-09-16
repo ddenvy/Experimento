@@ -27,3 +27,12 @@ public record KnowledgeDocumentDto(Guid Id, string Title, string SourceType, str
 public record SearchResultDto(Guid ChunkId, string DocumentTitle, string Reference, string SourceType, string Content, double Similarity);
 public record AuditEntryDto(long Id, DateTime TimestampUtc, Guid? ActorUserId, string Action, string EntityType, string? EntityId);
 public record CalibrationStatsDto(int Total, int WithOutcome, double MeanError, double MeanBias);
+
+// Сводки истории прогонов по версии формуляции (без тяжёлых rationale/кандидатов).
+public record PredictionRunSummaryDto(
+    Guid JobId, Guid? ResultId, string Status, string ModelDisplayName,
+    double SuccessProbability, double ToxicityScore, double StabilityScore,
+    string SideRiskLevel, bool HasOutcome, DateTime CreatedAtUtc);
+public record SimulationRunSummaryDto(
+    Guid JobId, Guid? ResultId, string Status, int IterationsExecuted,
+    double? BestSuccessProbability, double? BestScore, DateTime CreatedAtUtc);

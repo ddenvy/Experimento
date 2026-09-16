@@ -27,6 +27,8 @@ public record SubmitSimulationCommand(
 
 public record GetSimulationJobQuery(Guid JobId, Guid UserId = default) : IRequest<SimulationJobDto>;
 public record GetSimulationResultQuery(Guid JobId, Guid UserId = default) : IRequest<SimulationResultDto>;
+public record ListSimulationRunsQuery(Guid VersionId, Guid UserId = default)
+    : IRequest<IReadOnlyList<SimulationRunSummaryDto>>;
 
 public class SubmitSimulationValidator : AbstractValidator<SubmitSimulationCommand>
 {
@@ -120,5 +122,36 @@ public class GetSimulationResultHandler : IRequestHandler<GetSimulationResultQue
             : top.FirstOrDefault();
 
         return new SimulationResultDto(result.Id, result.JobId, result.IterationsExecuted, result.Summary, best, top);
+    }
+}
+
+/// <summary>
+/// История симуляций по версии формуляции: последние 20 job'ов со сводкой лучшего кандидата.
+/// </summary>
+public class ListSimulationRunsHandler : IRequestHandler<ListSimulationRunsQuery, IReadOnlyList<SimulationRunSummaryDto>>
+{
+    private readonly IAppDbContext _db;
+    private readonly ResourceAuthorization _auth;
+    public ListSimulationRunsHandler(IAppDbContext db, ResourceAuthorization auth) => (_db, _auth) = (db, auth);
+
+    public async Task<IReadOnlyList<SimulationRunSummaryDto>> Handle(ListSimulationRunsQuery request, CancellationToken ct)
+    {
+        if (!await _auth.OwnsVersionAsync(request.VersionId, request.UserId, ct))
+            throw new ForbiddenException();
+
+        return await _db.SimulationJobs
+            .AsNoTracking()
+            .Where(j => j.VersionId == request.VersionId)
+            .OrderByDescending(j => j.CreatedAtUtc)
+            .Take(20)
+            .Select(j => new SimulationRunSummaryDto(
+                j.Id,
+                j.Result != null ? j.Result.Id : (Guid?)null,
+                j.Status.ToString(),
+                j.Result != null ? j.Result.IterationsExecuted : 0,
+                j.Result != null && j.Result.BestCandidate != null ? j.Result.BestCandidate.SuccessProbability : (double?)null,
+                j.Result != null && j.Result.BestCandidate != null ? j.Result.BestCandidate.Score : (double?)null,
+                j.CreatedAtUtc))
+            .ToListAsync(ct);
     }
 }

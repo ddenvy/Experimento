@@ -11,9 +11,10 @@ import {
   BookOpen,
   ScrollText,
 } from "lucide-react";
+import { LogoMark } from "@/components/brand/logo";
 
 const nav = [
-  { href: "/", label: "Dashboard", icon: LayoutDashboard },
+  { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard },
   { href: "/formulations", label: "Formulations", icon: FlaskConical },
   { href: "/predictions", label: "Predictions", icon: Brain },
   { href: "/simulations", label: "Simulations", icon: Activity },
@@ -25,14 +26,19 @@ export function Sidebar() {
   const pathname = usePathname();
   return (
     <aside className="hidden md:flex w-64 flex-col border-r bg-card">
-      <div className="p-6 border-b">
-        <h1 className="text-xl font-bold tracking-tight">Experimento</h1>
-        <p className="text-xs text-muted-foreground mt-1">AI Formulation Co-Pilot</p>
+      <div className="p-5 border-b">
+        <Link href="/dashboard" className="inline-flex items-center gap-2.5">
+          <LogoMark className="h-8 w-8" />
+          <span className="flex flex-col leading-none">
+            <span className="text-lg font-extrabold tracking-tight">Experimento</span>
+            <span className="text-[11px] text-muted-foreground mt-1">AI Formulation Co-Pilot</span>
+          </span>
+        </Link>
       </div>
       <nav className="flex-1 p-3 space-y-1">
         {nav.map((item) => {
           const Icon = item.icon;
-          const active = pathname === item.href || (item.href !== "/" && pathname.startsWith(item.href));
+          const active = pathname === item.href || (item.href !== "/dashboard" && pathname.startsWith(item.href));
           return (
             <Link
               key={item.href}

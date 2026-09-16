@@ -11,6 +11,10 @@ public class PredictionsController : BaseController
     public PredictionsController(IMediator mediator, ICurrentUser currentUser, IAuditTrail audit)
         : base(mediator, currentUser, audit) { }
 
+    [HttpGet("formulation-versions/{versionId:guid}/predictions")]
+    public async Task<IActionResult> ListRuns(Guid versionId)
+        => Ok(await Mediator.Send(new ListPredictionRunsQuery(versionId, UserId)));
+
     [HttpPost("formulation-versions/{versionId:guid}/predictions")]
     public async Task<IActionResult> Submit(Guid versionId)
     {

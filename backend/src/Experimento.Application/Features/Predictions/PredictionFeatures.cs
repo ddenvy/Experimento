@@ -11,6 +11,8 @@ public record GetPredictionResultQuery(Guid JobId, Guid UserId = default) : IReq
 public record SubmitReviewCommand(Guid ResultId, Guid ReviewerUserId, string Decision, string? Comment) : IRequest<ReviewDto>;
 public record RecordOutcomeCommand(Guid ResultId, bool ActualSuccess, string ActualMetricsJson, string? Notes, Guid RecordedBy) : IRequest<OutcomeDto>;
 public record GetCalibrationStatsQuery(Guid UserId = default) : IRequest<CalibrationStatsDto>;
+public record ListPredictionRunsQuery(Guid VersionId, Guid UserId = default)
+    : IRequest<IReadOnlyList<PredictionRunSummaryDto>>;
 
 public class SubmitPredictionHandler : IRequestHandler<SubmitPredictionCommand, PredictionJobDto>
 {
@@ -161,5 +163,40 @@ public class GetCalibrationStatsHandler : IRequestHandler<GetCalibrationStatsQue
             withOutcome.Count,
             errors.Count > 0 ? errors.Average() : 0,
             biases.Count > 0 ? biases.Average() : 0);
+    }
+}
+
+/// <summary>
+/// История прогонов предсказаний по версии формуляции: последние 20 job'ов
+/// (включая ещё выполняющиеся и упавшие — результат для них опционален).
+/// </summary>
+public class ListPredictionRunsHandler : IRequestHandler<ListPredictionRunsQuery, IReadOnlyList<PredictionRunSummaryDto>>
+{
+    private readonly IAppDbContext _db;
+    private readonly ResourceAuthorization _auth;
+    public ListPredictionRunsHandler(IAppDbContext db, ResourceAuthorization auth) => (_db, _auth) = (db, auth);
+
+    public async Task<IReadOnlyList<PredictionRunSummaryDto>> Handle(ListPredictionRunsQuery request, CancellationToken ct)
+    {
+        if (!await _auth.OwnsVersionAsync(request.VersionId, request.UserId, ct))
+            throw new ForbiddenException();
+
+        return await _db.PredictionJobs
+            .AsNoTracking()
+            .Where(j => j.VersionId == request.VersionId)
+            .OrderByDescending(j => j.CreatedAtUtc)
+            .Take(20)
+            .Select(j => new PredictionRunSummaryDto(
+                j.Id,
+                j.Result != null ? j.Result.Id : (Guid?)null,
+                j.Status.ToString(),
+                j.Result != null ? j.Result.ModelRegistration.DisplayName : "",
+                j.Result != null ? j.Result.SuccessProbability : 0,
+                j.Result != null ? j.Result.ToxicityScore : 0,
+                j.Result != null ? j.Result.StabilityScore : 0,
+                j.Result != null ? j.Result.SideRiskLevel.ToString() : "",
+                j.Result != null && j.Result.Outcome != null,
+                j.CreatedAtUtc))
+            .ToListAsync(ct);
     }
 }

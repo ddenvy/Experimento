@@ -23,7 +23,7 @@ test.describe("Authentication", () => {
     await page.getByRole("button", { name: "Sign in" }).click();
 
     // Wait for redirect to dashboard
-    await expect(page).toHaveURL(/\/$/, { timeout: 10_000 });
+    await expect(page).toHaveURL(/\/dashboard/, { timeout: 10_000 });
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
     // Refresh-токен должен лежать в httpOnly-cookie (access-токен — только в памяти).
@@ -42,9 +42,18 @@ test.describe("Authentication", () => {
     await expect(page).toHaveURL(/\/login/);
   });
 
-  test("unauthenticated user is redirected to login", async ({ page }) => {
-    await page.goto("/");
+  test("unauthenticated user is redirected to login from a protected page", async ({ page }) => {
+    await page.goto("/dashboard");
     // AuthGuard redirects to /login when no token is present
     await expect(page).toHaveURL(/\/login/, { timeout: 10_000 });
+  });
+
+  test("landing page is public and links to sign in", async ({ page }) => {
+    await page.goto("/");
+    await expect(page).toHaveURL("http://localhost:3000/");
+    await expect(
+      page.getByRole("heading", { name: /Predict before you mix/ })
+    ).toBeVisible();
+    await expect(page.getByRole("link", { name: /Start free/ }).first()).toBeVisible();
   });
 });

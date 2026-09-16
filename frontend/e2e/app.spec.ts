@@ -21,7 +21,7 @@ test.describe("Authenticated workflow", () => {
   });
 
   test("dashboard shows stat cards", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
     const labels = ["Formulations", "Predictions", "Simulations", "Audit Integrity"];
     for (const label of labels) {
@@ -30,7 +30,7 @@ test.describe("Authenticated workflow", () => {
   });
 
   test("sidebar navigation links are present", async ({ page }) => {
-    await page.goto("/");
+    await page.goto("/dashboard");
     const links = ["Dashboard", "Formulations", "Predictions", "Simulations", "Knowledge Base", "Audit Trail"];
     for (const link of links) {
       await expect(page.getByRole("link", { name: link })).toBeVisible();
@@ -171,22 +171,30 @@ test.describe("Authenticated workflow", () => {
       "",
     ].join("\n");
 
+    // Уникальное имя файла: документы глобальны и видны между прогонами, поэтому одинаковое
+    // имя вызвало бы strict-mode неоднозначность в списке.
+    const fileName = `${marker}.csv`;
     // Скрытый input[type=file] принимает файл программно.
     await page.locator('input[type="file"]').setInputFiles({
-      name: "lab-table.csv",
+      name: fileName,
       mimeType: "text/csv",
       buffer: Buffer.from(csv, "utf-8"),
     });
-    await expect(page.getByText("lab-table.csv")).toBeVisible();
+    await expect(page.getByText(fileName, { exact: true })).toBeVisible();
     await page.getByRole("button", { name: "Index document" }).click();
 
     // Заголовок документа — имя файла без расширения; ждём готовности индексации.
-    await expect(page.locator("li").filter({ hasText: "lab-table" }).getByText("Ready", { exact: true })).toBeVisible({ timeout: 30000 });
+    await expect(
+      page.locator("li").filter({ hasText: `Paper · ${fileName}` }).getByText("Ready", { exact: true })
+    ).toBeVisible({ timeout: 30000 });
 
     // Поиск "по смыслу" находит разобранную строку таблицы (пары заголовок: значение).
+    // Документы глобальны и накапливаются между прогонами: идентичные строки из прошлых
+    // загрузок имеют ту же близость, поэтому проверяем паттерн любой E2E-загрузки,
+    // а готовность именно текущего документа подтвердили выше по уникальному имени.
     await page.getByPlaceholder("Search literature, tables and internal notes…").fill("what medicine helps bring down a fever");
     await page.getByRole("button", { name: "Search" }).click();
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible({ timeout: 20000 });
-    await expect(page.getByText(new RegExp(`compound: ${marker} paracetamol`)).first()).toBeVisible();
+    await expect(page.getByText(/compound: E2ETable\d+ paracetamol/).first()).toBeVisible();
   });
 });

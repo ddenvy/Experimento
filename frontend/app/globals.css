@@ -43,3 +43,67 @@
     @apply bg-background text-foreground;
   }
 }
+
+/* ===== Анимации лендинга ===== */
+@keyframes lp-float {
+  0%, 100% { transform: translateY(0) translateX(0); }
+  50% { transform: translateY(-18px) translateX(8px); }
+}
+
+@keyframes lp-drift {
+  0% { background-position: 0 0; }
+  100% { background-position: 56px 56px; }
+}
+
+@keyframes lp-pulse-dot {
+  0%, 100% { opacity: 1; transform: scale(1); }
+  50% { opacity: 0.45; transform: scale(0.8); }
+}
+
+@keyframes lp-caret {
+  0%, 45% { opacity: 1; }
+  50%, 100% { opacity: 0; }
+}
+
+@keyframes lp-scan {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(420%); }
+}
+
+.lp-float { animation: lp-float 9s ease-in-out infinite; }
+.lp-grid {
+  background-image:
+    linear-gradient(to right, rgb(148 163 184 / 0.07) 1px, transparent 1px),
+    linear-gradient(to bottom, rgb(148 163 184 / 0.07) 1px, transparent 1px);
+  background-size: 56px 56px;
+  animation: lp-drift 14s linear infinite;
+}
+.lp-caret { animation: lp-caret 1.05s step-end infinite; }
+.lp-pulse-dot { animation: lp-pulse-dot 1.6s ease-in-out infinite; }
+.lp-scanline { animation: lp-scan 3.2s cubic-bezier(0.4, 0, 0.2, 1) infinite; }
+
+.lp-reveal {
+  opacity: 0;
+  transform: translateY(26px);
+  transition: opacity 0.7s cubic-bezier(0.22, 1, 0.36, 1), transform 0.7s cubic-bezier(0.22, 1, 0.36, 1);
+  will-change: opacity, transform;
+}
+.lp-reveal.lp-visible {
+  opacity: 1;
+  transform: none;
+}
+
+@media (prefers-reduced-motion: reduce) {
+  .lp-float,
+  .lp-grid,
+  .lp-pulse-dot,
+  .lp-caret,
+  .lp-scanline {
+    animation: none !important;
+  }
+  .lp-reveal {
+    opacity: 1 !important;
+    transform: none !important;
+    transition: none !important;
+  }
+}

@@ -1,11 +1,13 @@
 "use client";
 
 import { useState } from "react";
+import Link from "next/link";
 import { useRouter } from "next/navigation";
 import { api } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { LogoMark } from "@/components/brand/logo";
 
 export default function LoginPage() {
   const router = useRouter();
@@ -21,7 +23,7 @@ export default function LoginPage() {
     try {
       // accessToken сохраняется в памяти внутри api-клиента; refresh-токен — в httpOnly-cookie.
       await api.login({ email, password });
-      router.push("/");
+      router.push("/dashboard");
     } catch (err) {
       setError(err instanceof Error ? err.message : "Login failed");
     } finally {
@@ -30,7 +32,11 @@ export default function LoginPage() {
   }
 
   return (
-    <div className="flex items-center justify-center min-h-[70vh]">
+    <div className="flex min-h-screen flex-col items-center justify-center bg-muted px-4">
+      <Link href="/" className="mb-6 inline-flex items-center gap-2.5">
+        <LogoMark className="h-10 w-10" />
+        <span className="text-xl font-extrabold tracking-tight">Experimento</span>
+      </Link>
       <Card className="w-full max-w-md">
         <CardHeader>
           <CardTitle>Sign in to Experimento</CardTitle>
@@ -52,6 +58,9 @@ export default function LoginPage() {
           </form>
         </CardContent>
       </Card>
+      <Link href="/" className="mt-6 text-sm text-muted-foreground hover:text-foreground transition-colors">
+        ← Back to home
+      </Link>
     </div>
   );
 }

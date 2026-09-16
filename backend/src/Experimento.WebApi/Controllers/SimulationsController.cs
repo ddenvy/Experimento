@@ -11,6 +11,10 @@ public class SimulationsController : BaseController
     public SimulationsController(IMediator mediator, ICurrentUser currentUser, IAuditTrail audit)
         : base(mediator, currentUser, audit) { }
 
+    [HttpGet("formulation-versions/{versionId:guid}/simulations")]
+    public async Task<IActionResult> ListRuns(Guid versionId)
+        => Ok(await Mediator.Send(new ListSimulationRunsQuery(versionId, UserId)));
+
     [HttpPost("formulation-versions/{versionId:guid}/simulations")]
     public async Task<IActionResult> Submit(Guid versionId, [FromBody] SubmitSimulationRequest? request)
     {
