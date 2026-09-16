@@ -20,4 +20,7 @@ public class FormulationComponent
     /// только из верифицированного каталога; свойства копируются из каталога.
     /// </summary>
     public int? PubChemCid { get; set; }
+
+    /// <summary>Канонический SMILES из каталога (снимок структуры на момент создания версии).</summary>
+    public string? Smiles { get; set; }
 }

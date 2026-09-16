@@ -68,7 +68,7 @@ public class PubChemCatalogService : IChemicalCatalogService
         if (cachedByName is not null) return ToDto(cachedByName);
 
         // 2. Запрос свойств в PubChem по названию (включая синонимы).
-        var propsUrl = $"/rest/pug/compound/name/{Uri.EscapeDataString(name)}/property/Title,MolecularFormula,MolecularWeight/JSON";
+        var propsUrl = $"/rest/pug/compound/name/{Uri.EscapeDataString(name)}/property/Title,MolecularFormula,MolecularWeight,CanonicalSMILES/JSON";
         using var propsDoc = await GetJsonAsync(propsUrl, cancellationToken);
         if (propsDoc is null ||
             !propsDoc.RootElement.TryGetProperty("PropertyTable", out var table) ||
@@ -82,12 +82,26 @@ public class PubChemCatalogService : IChemicalCatalogService
         var cid = p.GetProperty("CID").GetInt32();
         var title = p.TryGetProperty("Title", out var t) ? t.GetString() ?? name : name;
         var formula = p.TryGetProperty("MolecularFormula", out var f) ? f.GetString() : null;
+        var smiles = p.TryGetProperty("CanonicalSMILES", out var s) ? s.GetString() : null;
         var molarMass = p.TryGetProperty("MolecularWeight", out var mw) && double.TryParse(mw.GetString(),
             System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
 
         // 3. Вещество могло быть закэшировано раньше под другим именем (синонимом) — CID совпадёт.
+        //    Дозаполняем SMILES для записей, созданных до появления структурных полей.
         var existing = await _db.ChemicalCatalog.FirstOrDefaultAsync(e => e.PubChemCid == cid, cancellationToken);
-        if (existing is not null) return ToDto(existing);
+        if (existing is not null)
+        {
+            var changed = false;
+            if (existing.Smiles is null && smiles is not null) { existing.Smiles = smiles; changed = true; }
+            if (existing.Formula is null && formula is not null) { existing.Formula = formula; changed = true; }
+            if (existing.CasNumber is null)
+            {
+                try { existing.CasNumber = await FetchPrimaryCasAsync(cid, cancellationToken); changed = true; }
+                catch (Exception ex) { _logger.LogWarning(ex, "Failed to fetch synonyms/CAS for CID {Cid}", cid); }
+            }
+            if (changed) await _db.SaveChangesAsync(cancellationToken);
+            return ToDto(existing);
+        }
 
         // 4. CAS-номер берём из списка синонимов (доп. запрос, только при первом резолве).
         string? cas = null;
@@ -108,6 +122,7 @@ public class PubChemCatalogService : IChemicalCatalogService
             CanonicalName = title,
             CasNumber = cas,
             Formula = formula,
+            Smiles = smiles,
             MolarMass = molarMass
         };
         _db.ChemicalCatalog.Add(entry);
@@ -121,7 +136,7 @@ public class PubChemCatalogService : IChemicalCatalogService
         if (cids.Count == 0) return Array.Empty<ChemicalDto>();
         return await _db.ChemicalCatalog
             .Where(e => cids.Contains(e.PubChemCid))
-            .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass))
+            .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles))
             .ToListAsync(cancellationToken);
     }
 
@@ -175,5 +190,5 @@ public class PubChemCatalogService : IChemicalCatalogService
     }
 
     private static ChemicalDto ToDto(ChemicalCatalogEntry e) =>
-        new(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass);
+        new(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles);
 }

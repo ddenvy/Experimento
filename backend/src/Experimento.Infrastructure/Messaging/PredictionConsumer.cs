@@ -106,7 +106,7 @@ public class PredictionConsumer : IConsumer<SubmitPredictionCommand>
     private static FormulationSnapshot MapToSnapshot(FormulationVersion version)
     {
         var components = version.Components.Select(c => new ComponentSnapshot(
-            c.ChemicalName, c.CasNumber, c.Formula, c.MolarMass, c.Proportion, c.Role)).ToList();
+            c.ChemicalName, c.CasNumber, c.Formula, c.MolarMass, c.Proportion, c.Role, c.Smiles)).ToList();
         var conditions = new ConditionsSnapshot(
             version.Conditions.TemperatureCelsius, version.Conditions.PressureKPa,
             version.Conditions.PhTarget, version.Conditions.Solvent, version.Conditions.DeliveryTarget);

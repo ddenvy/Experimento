@@ -21,6 +21,9 @@ public class ChemicalCatalogEntry
     /// <summary>Молекулярная формула в нотации PubChem, например C9H8O4.</summary>
     public string? Formula { get; set; }
 
+    /// <summary>Канонический SMILES — основа для определения функциональных групп и класса соединения.</summary>
+    public string? Smiles { get; set; }
+
     /// <summary>Молекулярная масса, г/mol (PubChem MolecularWeight).</summary>
     public double MolarMass { get; set; }
 

@@ -15,7 +15,8 @@ public record ComponentSnapshot(
     string? Formula,
     double MolarMass,
     double Proportion,
-    string? Role);
+    string? Role,
+    string? Smiles);
 
 public record ConditionsSnapshot(
     double TemperatureCelsius,

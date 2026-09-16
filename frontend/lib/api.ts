@@ -92,6 +92,7 @@ export interface ChemicalDto {
   casNumber: string | null;
   formula: string | null;
   molarMass: number;
+  smiles: string | null;
 }
 
 export interface ConditionsDto {

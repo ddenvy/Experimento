@@ -52,12 +52,12 @@ public class ApiFixture : WebApplicationFactory<Program>
             new ChemicalCatalogEntry
             {
                 PubChemCid = AspirinCid, CanonicalName = "Aspirin", CasNumber = "50-78-2",
-                Formula = "C9H8O4", MolarMass = 180.16
+                Formula = "C9H8O4", MolarMass = 180.16, Smiles = "CC(=O)Oc1ccccc1C(=O)O"
             },
             new ChemicalCatalogEntry
             {
                 PubChemCid = SodiumChlorideCid, CanonicalName = "Sodium chloride", CasNumber = "7647-14-5",
-                Formula = "ClNa", MolarMass = 58.44
+                Formula = "ClNa", MolarMass = 58.44, Smiles = "[Na+].[Cl-]"
             }
         };
 

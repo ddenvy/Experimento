@@ -48,7 +48,7 @@ public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
 
             var snapshot = new FormulationSnapshot(
                 version.Id,
-                version.Components.Select(c => new ComponentSnapshot(c.ChemicalName, c.CasNumber, c.Formula, c.MolarMass, c.Proportion, c.Role)).ToList(),
+                version.Components.Select(c => new ComponentSnapshot(c.ChemicalName, c.CasNumber, c.Formula, c.MolarMass, c.Proportion, c.Role, c.Smiles)).ToList(),
                 new ConditionsSnapshot(version.Conditions.TemperatureCelsius, version.Conditions.PressureKPa,
                     version.Conditions.PhTarget, version.Conditions.Solvent, version.Conditions.DeliveryTarget),
                 version.Formulation?.TargetPurpose ?? string.Empty);

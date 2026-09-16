@@ -1,18 +1,13 @@
 namespace Experimento.Infrastructure.Predictions;
 
 /// <summary>
-/// Deterministic rule-based property predictor (model: rule-based-v1).
+/// Deterministic rule-based property predictor (model: rule-based-v2).
 /// Produces explainable scoring factors that feed the rationale generator.
 /// </summary>
 public class RuleBasedPropertyPredictor : IPropertyPredictor
 {
     public string ModelName => "rule-based";
-    public string ModelVersion => "v1";
-
-    private static readonly HashSet<string> Toxicophores = new(StringComparer.OrdinalIgnoreCase)
-    {
-        "nitro", "azide", "cyanide", "arsenic", "mercury", "lead", "cadmium", "phosgene", "hydrazine"
-    };
+    public string ModelVersion => "v2";
 
     public Task<PredictionOutcome> PredictAsync(FormulationSnapshot snapshot, CancellationToken cancellationToken = default)
     {
@@ -39,12 +34,32 @@ public class RuleBasedPropertyPredictor : IPropertyPredictor
         factors.Add(new ScoringFactor("TemperatureStability", tempScore - 0.5,
             $"Temperature {snapshot.Conditions.TemperatureCelsius}°C is {tempDelta:F0}°C from ambient."));
 
-        // Factor 4: toxicophore presence
-        var hasToxicophore = snapshot.Components.Any(c =>
-            Toxicophores.Any(t => (c.ChemicalName + " " + c.Formula + " " + c.Role).Contains(t, StringComparison.OrdinalIgnoreCase)));
-        var toxicScore = hasToxicophore ? 0.3 : 0.8;
-        factors.Add(new ScoringFactor("ToxicophorePresence", (hasToxicophore ? -0.4 : 0.2),
-            hasToxicophore ? "Known toxicophores detected in components." : "No known toxicophores detected."));
+        // Factor 4: структурный скрининг опасности по формуле и SMILES из каталога.
+        // Категории невзаимоисключающие, поэтому вклады суммируются (с потолком).
+        var analyses = snapshot.Components
+            .Select(c => StructureAnalyzer.Analyze(c.Formula, c.Smiles, $"{c.ChemicalName} {c.Role}"))
+            .ToList();
+        var anyHeavy = analyses.Any(a => a.HeavyMetal);
+        var anyEnergetic = analyses.Any(a => a.EnergeticGroup);
+        var anyReactive = analyses.Any(a => a.ReactiveGroup);
+        var anyHalogen = analyses.Any(a => a.Halogenated);
+
+        var hazardPenalty = 0.0
+                           + (anyHeavy ? 0.5 : 0)
+                           + (anyEnergetic ? 0.3 : 0)
+                           + (anyReactive ? 0.2 : 0)
+                           + (anyHalogen ? 0.1 : 0);
+        hazardPenalty = Math.Min(0.7, hazardPenalty);
+
+        var findings = analyses.SelectMany(a => a.Findings).Distinct().ToList();
+        var hazardContribution = hazardPenalty == 0 ? 0.2 : -(0.1 + hazardPenalty);
+        var hazardDescription = hazardPenalty == 0
+            ? "No structural hazard indicators detected from catalog formula/SMILES."
+            : "Structural hazard indicators: " + string.Join("; ", findings) + ".";
+        factors.Add(new ScoringFactor("StructuralHazards", hazardContribution, hazardDescription));
+
+        // Базовый уровень «безопасности» 0.8, вычитаем подтверждённые структурные риски.
+        var toxicScore = Math.Clamp(0.8 - hazardPenalty, 0.1, 0.9);
 
         // Factor 5: stabilizer presence for targeted delivery
         var needStabilizer = !string.IsNullOrEmpty(snapshot.Conditions.DeliveryTarget);

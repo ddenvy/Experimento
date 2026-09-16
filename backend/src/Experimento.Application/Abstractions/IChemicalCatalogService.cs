@@ -8,7 +8,8 @@ public record ChemicalDto(
     string Name,
     string? CasNumber,
     string? Formula,
-    double MolarMass);
+    double MolarMass,
+    string? Smiles);
 
 /// <summary>
 /// Доступ к каталогу химических веществ: автоподсказки по названию,

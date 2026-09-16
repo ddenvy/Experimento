@@ -35,7 +35,7 @@ public class RationaleGenerator : IRationaleGenerator
         {
             var category = factor.Name switch
             {
-                "ToxicophorePresence" => RationaleCategory.Toxicity,
+                "StructuralHazards" or "ToxicophorePresence" => RationaleCategory.Toxicity,
                 "StabilizerForDelivery" or "TemperatureStability" or "ProportionUniformity" => RationaleCategory.Stability,
                 _ => RationaleCategory.Synthesis
             };

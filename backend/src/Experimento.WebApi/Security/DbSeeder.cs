@@ -15,14 +15,16 @@ public static class DbSeeder
 
     public static async Task SeedAsync(AppDbContext db, bool seedTestAdmin = false)
     {
-        if (!await db.ModelRegistrations.AnyAsync())
+        // Регистрируем конкретную версию модели; старые регистрации (v1) в существующих БД
+        // не мешают добавить новую — консьюмер ищет модель по имени и версии.
+        if (!await db.ModelRegistrations.AnyAsync(m => m.Name == "rule-based" && m.Version == "v2"))
         {
             db.ModelRegistrations.Add(new ModelRegistration
             {
                 Name = "rule-based",
-                Version = "v1",
+                Version = "v2",
                 Description = "Deterministic rule-based property predictor using molar balance, proportion uniformity, " +
-                              "temperature stability, toxicophore detection, and stabilizer checks.",
+                              "temperature stability, PubChem-based structural hazard screening (formula + SMILES), and stabilizer checks.",
                 ContextOfUse = "Initial screening of formulation success probability, toxicity, stability, and side risks. " +
                                "For hypothesis generation only; not for standalone regulatory decisions."
             });

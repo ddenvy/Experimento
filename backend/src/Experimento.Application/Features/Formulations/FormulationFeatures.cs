@@ -125,6 +125,7 @@ public class CreateVersionHandler : IRequestHandler<CreateVersionCommand, Formul
                 CasNumber = entry.CasNumber,
                 Formula = entry.Formula,
                 MolarMass = entry.MolarMass,
+                Smiles = entry.Smiles,
                 Proportion = c.Proportion,
                 Role = c.Role
             });
