@@ -10,6 +10,7 @@ import { VersionComposer } from "@/components/formulations/version-composer";
 import { VersionCompare } from "@/components/formulations/version-compare";
 import { PredictionsTab } from "@/components/predictions/predictions-tab";
 import { SimulationsTab } from "@/components/simulations/simulations-tab";
+import { ReportTab } from "@/components/reports/report-tab";
 import { Plus, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,6 +18,7 @@ const TABS = [
   { id: "composition", label: "Composition" },
   { id: "predictions", label: "Predictions" },
   { id: "simulations", label: "Simulations" },
+  { id: "report", label: "Report" },
 ] as const;
 
 type TabId = (typeof TABS)[number]["id"];
@@ -185,6 +187,10 @@ function FormulationDetail() {
 
       {tab === "simulations" && (
         <SimulationsTab key="simulations" versions={versions} initialVersionId={selectedVersionParam} />
+      )}
+
+      {tab === "report" && (
+        <ReportTab key="report" versions={versions} initialVersionId={selectedVersionParam} />
       )}
     </div>
   );

@@ -363,8 +363,11 @@ export async function refreshAccessToken(): Promise<boolean> {
 }
 
 function redirectToLogin(): void {
+  // Жёсткая навигация с полной перезагрузкой страницы: модуль вне React, useRouter
+  // недоступен, а при истёкшей сессии нужна именно полная перезагрузка на /login.
   if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
-    window.location.assign("/login");
+    // eslint-disable-next-line @next/next/no-location-assign-relative-destination -- намеренный hard redirect
+    window.location.href = "/login";
   }
 }
 
@@ -385,7 +388,13 @@ async function parseErrorMessage(res: Response): Promise<string> {
   return "";
 }
 
-async function request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
+async function request<T>(
+  path: string,
+  options: RequestInit = {},
+  isRetry = false,
+  // Не-JSON ответы (например, Markdown-отчёт) парсятся переданным парсером.
+  parse: (res: Response) => Promise<T> = async (res) => (await res.json()) as T
+): Promise<T> {
   // Для FormData заголовок Content-Type задаёт сам браузер вместе с boundary multipart.
   const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const res = await fetch(`${BASE_URL}${path}`, {
@@ -401,7 +410,7 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
   if (res.status === 401 && !isRetry && !path.startsWith("/auth/")) {
     // Access-токен истёк — один раз пробуем обновить его через cookie и повторяем запрос.
     if (await refreshAccessToken()) {
-      return request<T>(path, options, true);
+      return request<T>(path, options, true, parse);
     }
     redirectToLogin();
     throw new ApiError("Session expired", 401);
@@ -412,7 +421,7 @@ async function request<T>(path: string, options: RequestInit = {}, isRetry = fal
     throw new ApiError(msg || `Request failed (${res.status})`, res.status);
   }
   if (res.status === 204) return undefined as T;
-  return (await res.json()) as T;
+  return parse(res);
 }
 
 export const api = {
@@ -515,6 +524,15 @@ export const api = {
   compareVersions: (formulationId: string, a: string, b: string) =>
     request<VersionComparisonDto>(
       `/formulations/${formulationId}/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+    ),
+
+  // Reports (Markdown text — не JSON)
+  getVersionReport: (versionId: string) =>
+    request<string>(
+      `/reports/formulation-versions/${versionId}/report`,
+      {},
+      false,
+      (res) => res.text()
     ),
 
   // Knowledge

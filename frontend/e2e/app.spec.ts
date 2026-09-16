@@ -387,6 +387,80 @@ test.describe("Authenticated workflow", () => {
     await expect(modifiedRow).toContainText("40.0 pp");
   });
 
+  test("version report renders markdown and downloads as .md", async ({ page, request }) => {
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Report ${marker}`, description: "report e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Report Form ${marker}`, targetPurpose: "report test" },
+        headers: authHeader,
+      })
+    ).json();
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+    const versionResp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      }
+    );
+    expect(versionResp.ok()).toBeTruthy();
+
+    await page.goto(
+      `/projects/${project.id}/formulations/${formulation.id}?tab=report`
+    );
+    await expect(page.getByRole("heading", { name: "Version report" })).toBeVisible();
+
+    // Кнопки экспорта появляются только после генерации.
+    await expect(page.getByTestId("download-report")).toHaveCount(0);
+    await page.getByTestId("generate-report").click();
+
+    const report = page.getByTestId("report-content");
+    await expect(report).toBeVisible({ timeout: 10000 });
+    await expect(report).toContainText("Formulation Report:");
+    await expect(report).toContainText("Composition");
+    await expect(report).toContainText("Aspirin");
+
+    // Print/PDF доступна (сам диалог печати в e2e не вызываем).
+    await expect(page.getByTestId("print-report")).toBeEnabled();
+
+    // Download .md: браузер выдаёт событие загрузки с корректным именем файла.
+    const downloadPromise = page.waitForEvent("download");
+    await page.getByTestId("download-report").click();
+    const download = await downloadPromise;
+    expect(download.suggestedFilename()).toMatch(/\.md$/);
+
+    // Таблицы отчёта не растягивают страницу по горизонтали.
+    const overflow = await page.evaluate(() => ({
+      scrollWidth: document.documentElement.scrollWidth,
+      innerWidth: window.innerWidth,
+    }));
+    expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth);
+  });
+
   test("audit trail page lists entries and supports integrity check", async ({ page }) => {
     await page.goto("/audit");
     await expect(page.getByRole("heading", { name: "Audit Trail" })).toBeVisible();
