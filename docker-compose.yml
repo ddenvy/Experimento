@@ -1,0 +1,80 @@
+services:
+  postgres:
+    image: pgvector/pgvector:pg17
+    container_name: experimento-postgres
+    environment:
+      POSTGRES_DB: experimento
+      POSTGRES_USER: experimento
+      POSTGRES_PASSWORD: experimento
+    ports:
+      - "5432:5432"
+    volumes:
+      - experimento-pgdata:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U experimento -d experimento"]
+      interval: 5s
+      timeout: 5s
+      retries: 10
+
+  rabbitmq:
+    image: rabbitmq:3-management
+    container_name: experimento-rabbitmq
+    environment:
+      RABBITMQ_DEFAULT_USER: experimento
+      RABBITMQ_DEFAULT_PASS: experimento
+    ports:
+      - "5672:5672"
+      - "15672:15672"
+    volumes:
+      - experimento-rabbitmq-data:/var/lib/rabbitmq
+    healthcheck:
+      test: ["CMD", "rabbitmq-diagnostics", "-q", "ping"]
+      interval: 10s
+      timeout: 10s
+      retries: 10
+
+  backend:
+    build:
+      context: ./backend
+    container_name: experimento-backend
+    environment:
+      ASPNETCORE_ENVIRONMENT: Production
+      ASPNETCORE_URLS: http://0.0.0.0:8080
+      ConnectionStrings__Default: Host=postgres;Port=5432;Database=experimento;Username=experimento;Password=experimento
+      RabbitMq__Host: rabbitmq
+      RabbitMq__Username: experimento
+      RabbitMq__Password: experimento
+      # Секрет обязателен и берётся из .env (не хардкодим в репозитории). Минимум 32 символа.
+      Jwt__Key: ${JWT_KEY:?JWT_KEY is required — set it in .env (at least 32 characters)}
+      Jwt__Issuer: Experimento
+      Jwt__Audience: Experimento
+      Cors__Origins__0: ${FRONTEND_ORIGIN:-http://localhost:3000}
+      Ai__Provider: gemini
+      Ai__Gemini__ApiKey: ${GEMINI_API_KEY:-}
+      Ai__Gemini__ChatModel: gemini-3.5-flash-lite
+    ports:
+      - "5126:8080"
+    depends_on:
+      postgres:
+        condition: service_healthy
+      rabbitmq:
+        condition: service_healthy
+    restart: unless-stopped
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        NEXT_PUBLIC_API_URL: http://localhost:5126/api
+    container_name: experimento-frontend
+    environment:
+      API_INTERNAL_URL: http://backend:8080/api
+    ports:
+      - "3000:3000"
+    depends_on:
+      - backend
+    restart: unless-stopped
+
+volumes:
+  experimento-pgdata:
+  experimento-rabbitmq-data:

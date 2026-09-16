@@ -1,0 +1,15 @@
+<Solution>
+  <Folder Name="/src/">
+    <Project Path="src/Experimento.Ai/Experimento.Ai.csproj" />
+    <Project Path="src/Experimento.Application/Experimento.Application.csproj" />
+    <Project Path="src/Experimento.Domain/Experimento.Domain.csproj" />
+    <Project Path="src/Experimento.Infrastructure/Experimento.Infrastructure.csproj" />
+    <Project Path="src/Experimento.WebApi/Experimento.WebApi.csproj" />
+  </Folder>
+  <Folder Name="/tests/">
+    <Project Path="tests/Experimento.Application.Tests/Experimento.Application.Tests.csproj" />
+    <Project Path="tests/Experimento.Domain.Tests/Experimento.Domain.Tests.csproj" />
+    <Project Path="tests/Experimento.Infrastructure.Tests/Experimento.Infrastructure.Tests.csproj" />
+    <Project Path="tests/Experimento.WebApi.Tests/Experimento.WebApi.Tests.csproj" />
+  </Folder>
+</Solution>

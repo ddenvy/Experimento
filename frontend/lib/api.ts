@@ -1,0 +1,352 @@
+// Минимальный типизированный API-клиент бэкенда Experimento.
+// В продакшене типы должны генерироваться из OpenAPI-спецификации.
+
+// Access-токен живёт ТОЛЬКО в памяти модуля (не в localStorage — это XSS-поверхность).
+// Refresh-токен хранится в httpOnly-cookie и не доступен из JS.
+let accessToken: string | null = null;
+
+export function getAccessToken(): string | null {
+  return accessToken;
+}
+
+export function setAccessToken(token: string | null): void {
+  accessToken = token;
+}
+
+// Серверный SSR (в Docker) обращается по внутреннему имени сервиса;
+// браузер — по публичному URL.
+export function getBaseUrl(): string {
+  if (typeof window === "undefined") {
+    return process.env.API_INTERNAL_URL ?? process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5126/api";
+  }
+  return process.env.NEXT_PUBLIC_API_URL ?? "http://localhost:5126/api";
+}
+
+const BASE_URL = getBaseUrl();
+
+// Базовый адрес SignalR-хаба (используется только в браузере).
+export function getHubUrl(): string {
+  return new URL("/hubs/jobs", BASE_URL).toString();
+}
+
+// ---- Доменные типы (зеркала серверных DTO, camelCase JSON) ----
+
+export interface UserDto {
+  id: string;
+  email: string;
+  displayName: string;
+  role: string;
+}
+
+export interface AuthResponse {
+  user: UserDto;
+  accessToken: string;
+}
+
+export interface ProjectDto {
+  id: string;
+  name: string;
+  description: string | null;
+  createdAtUtc: string;
+}
+
+export interface FormulationDto {
+  id: string;
+  projectId: string;
+  name: string;
+  targetPurpose: string;
+  currentVersionNumber: number;
+}
+
+export interface ComponentInput {
+  chemicalName: string;
+  molarMass: number;
+  proportion: number;
+  role?: string;
+}
+
+export interface ConditionsInput {
+  temperatureCelsius: number;
+  phTarget?: number;
+  solvent?: string;
+}
+
+export interface FormulationVersionDto {
+  id: string;
+  formulationId: string;
+  versionNumber: number;
+  status: string;
+  notes: string | null;
+  createdAtUtc: string;
+}
+
+export interface JobDto {
+  id: string;
+  versionId: string;
+  status: string;
+  progress: number;
+  stage?: string | null;
+  createdAtUtc: string;
+}
+
+export interface RationaleSourceDto {
+  title: string;
+  reference: string;
+  type: string;
+  similarity: number;
+}
+
+export interface RationaleItemDto {
+  id: string;
+  category: string;
+  claim: string;
+  explanation: string;
+  confidence: number;
+  sources: RationaleSourceDto[];
+}
+
+export interface PredictionResultDto {
+  id: string;
+  jobId: string;
+  modelRegistrationId: string;
+  modelDisplayName: string;
+  successProbability: number;
+  toxicityScore: number;
+  stabilityScore: number;
+  sideRiskLevel: string;
+  summary: string;
+  rationaleItems: RationaleItemDto[];
+}
+
+export interface SimulationCandidateDto {
+  id: string;
+  rank: number;
+  successProbability: number;
+  score: number;
+  parametersJson: string;
+}
+
+export interface SimulationResultDto {
+  id: string;
+  jobId: string;
+  iterationsExecuted: number;
+  summary: string;
+  bestCandidate: SimulationCandidateDto | null;
+  topCandidates: SimulationCandidateDto[];
+}
+
+export interface KnowledgeDocumentDto {
+  id: string;
+  title: string;
+  sourceType: string;
+  reference: string;
+  status: string;
+  uploadedAtUtc: string;
+}
+
+export interface SearchResultDto {
+  chunkId: string;
+  documentTitle: string;
+  reference: string;
+  sourceType: string;
+  content: string;
+  similarity: number;
+}
+
+export interface AuditEntryDto {
+  id: number;
+  timestampUtc: string;
+  actorUserId: string | null;
+  action: string;
+  entityType: string;
+  entityId: string | null;
+}
+
+export interface AuditIntegrityDto {
+  isIntact: boolean;
+  firstBrokenId: number | null;
+}
+
+export interface SubmitSimulationInput {
+  iterations: number;
+  varyConcentrations: boolean;
+  varyTemperature: boolean;
+  varyPh: boolean;
+  seed?: number;
+  targetMetric: string;
+}
+
+export class ApiError extends Error {
+  constructor(message: string, public status: number) {
+    super(message);
+  }
+}
+
+// ---- Единоразовое обновление access-токена (single-flight: все параллельные
+// 401 ждут один запрос /auth/refresh, а не шлют пачку refresh) ----
+let refreshInFlight: Promise<boolean> | null = null;
+
+export async function refreshAccessToken(): Promise<boolean> {
+  if (refreshInFlight) return refreshInFlight;
+
+  refreshInFlight = (async () => {
+    try {
+      const res = await fetch(`${BASE_URL}/auth/refresh`, {
+        method: "POST",
+        credentials: "include",
+      });
+      if (!res.ok) {
+        accessToken = null;
+        return false;
+      }
+      const body = (await res.json()) as { accessToken?: string };
+      if (!body.accessToken) {
+        accessToken = null;
+        return false;
+      }
+      accessToken = body.accessToken;
+      return true;
+    } catch {
+      accessToken = null;
+      return false;
+    } finally {
+      // Сбрасываем после того, как все ожидающие получили результат.
+      refreshInFlight = null;
+    }
+  })();
+
+  return refreshInFlight;
+}
+
+function redirectToLogin(): void {
+  if (typeof window !== "undefined" && !window.location.pathname.startsWith("/login")) {
+    window.location.assign("/login");
+  }
+}
+
+async function parseErrorMessage(res: Response): Promise<string> {
+  try {
+    const data: unknown = await res.json();
+    if (data && typeof data === "object" && "error" in data) {
+      const error = (data as { error: unknown }).error;
+      if (typeof error === "string") return error;
+    }
+    if (data && typeof data === "object" && "details" in data) {
+      const details = (data as { details?: Array<{ errorMessage?: string }> }).details;
+      if (Array.isArray(details)) return details.map((d) => d.errorMessage).filter(Boolean).join(", ");
+    }
+  } catch {
+    // тело ответа не JSON
+  }
+  return "";
+}
+
+async function request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
+  const res = await fetch(`${BASE_URL}${path}`, {
+    ...options,
+    credentials: "include",
+    headers: {
+      "Content-Type": "application/json",
+      ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
+      ...options.headers,
+    },
+  });
+
+  if (res.status === 401 && !isRetry && !path.startsWith("/auth/")) {
+    // Access-токен истёк — один раз пробуем обновить его через cookie и повторяем запрос.
+    if (await refreshAccessToken()) {
+      return request<T>(path, options, true);
+    }
+    redirectToLogin();
+    throw new ApiError("Session expired", 401);
+  }
+
+  if (!res.ok) {
+    const msg = await parseErrorMessage(res);
+    throw new ApiError(msg || `Request failed (${res.status})`, res.status);
+  }
+  if (res.status === 204) return undefined as T;
+  return (await res.json()) as T;
+}
+
+export const api = {
+  // Auth
+  register: (data: { email: string; password: string; displayName: string }) =>
+    request<AuthResponse>("/auth/register", { method: "POST", body: JSON.stringify(data) })
+      .then((res) => {
+        setAccessToken(res.accessToken);
+        return res;
+      }),
+  login: (data: { email: string; password: string }) =>
+    request<AuthResponse>("/auth/login", { method: "POST", body: JSON.stringify(data) })
+      .then((res) => {
+        setAccessToken(res.accessToken);
+        return res;
+      }),
+  logout: async (): Promise<void> => {
+    try {
+      await request("/auth/logout", { method: "POST" });
+    } finally {
+      setAccessToken(null);
+    }
+  },
+
+  // Formulations
+  listProjects: () => request<ProjectDto[]>("/projects"),
+  createProject: (data: { name: string; description?: string }) =>
+    request<ProjectDto>("/projects", { method: "POST", body: JSON.stringify(data) }),
+
+  listFormulations: (projectId: string) =>
+    request<FormulationDto[]>(`/formulations/projects/${projectId}`),
+  createFormulation: (data: { projectId: string; name: string; targetPurpose: string }) =>
+    request<FormulationDto>("/formulations", { method: "POST", body: JSON.stringify(data) }),
+  listVersions: (formulationId: string) =>
+    request<FormulationVersionDto[]>(`/formulations/${formulationId}/versions`),
+  createVersion: (formulationId: string, data: {
+    components: ComponentInput[];
+    conditions: ConditionsInput;
+    notes?: string;
+  }) =>
+    request<FormulationVersionDto>(`/formulations/${formulationId}/versions`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+
+  // Predictions
+  submitPrediction: (versionId: string) =>
+    request<JobDto>(`/predictions/formulation-versions/${versionId}/predictions`, { method: "POST" }),
+  getPredictionJob: (jobId: string) =>
+    request<JobDto>(`/predictions/prediction-jobs/${jobId}`),
+  getPredictionResult: (jobId: string) =>
+    request<PredictionResultDto>(`/predictions/prediction-jobs/${jobId}/result`),
+
+  // Simulations
+  submitSimulation: (versionId: string, data: SubmitSimulationInput) =>
+    request<JobDto>(`/simulations/formulation-versions/${versionId}/simulations`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  getSimulationJob: (jobId: string) =>
+    request<JobDto>(`/simulations/simulation-jobs/${jobId}`),
+  getSimulationResult: (jobId: string) =>
+    request<SimulationResultDto>(`/simulations/simulation-jobs/${jobId}/result`),
+
+  // Models
+  listModels: () => request<unknown[]>("/models"),
+
+  // Knowledge
+  listDocuments: (projectId?: string) =>
+    request<KnowledgeDocumentDto[]>("/knowledge/documents" + (projectId ? `?projectId=${encodeURIComponent(projectId)}` : "")),
+  searchKnowledge: (query: string, projectId?: string) =>
+    request<SearchResultDto[]>("/knowledge/search", {
+      method: "POST",
+      body: JSON.stringify({ query, projectId }),
+    }),
+
+  // Audit
+  getAuditTrail: (entityType?: string, entityId?: string) =>
+    request<AuditEntryDto[]>(
+      "/audit" + (entityType ? `?entityType=${encodeURIComponent(entityType)}&entityId=${encodeURIComponent(entityId ?? "")}` : "")
+    ),
+  verifyAudit: () => request<AuditIntegrityDto>("/audit/verify"),
+};
