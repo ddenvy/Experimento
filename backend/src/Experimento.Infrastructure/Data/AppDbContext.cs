@@ -29,6 +29,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
     public DbSet<ChemicalCatalogEntry> ChemicalCatalog => Set<ChemicalCatalogEntry>();
+    public DbSet<ChemicalRegulation> ChemicalRegulations => Set<ChemicalRegulation>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -108,6 +109,17 @@ public class AppDbContext : DbContext, IAppDbContext
         {
             b.HasIndex(e => e.PubChemCid).IsUnique();
             b.HasIndex(e => e.CanonicalName);
+        });
+
+        // Регуляторные статусы: у одного вещества не может быть двух записей по одному органу.
+        modelBuilder.Entity<ChemicalRegulation>(b =>
+        {
+            b.HasIndex(r => new { r.ChemicalCatalogEntryId, r.Authority }).IsUnique();
+            b.HasIndex(r => r.Authority);
+            b.HasOne(r => r.ChemicalCatalogEntry)
+                .WithMany()
+                .HasForeignKey(r => r.ChemicalCatalogEntryId)
+                .OnDelete(DeleteBehavior.Cascade);
         });
 
         base.OnModelCreating(modelBuilder);

@@ -1,3 +1,5 @@
+using Experimento.Application.DTOs;
+
 namespace Experimento.Application.Abstractions;
 
 /// <summary>
@@ -54,4 +56,17 @@ public interface IChemicalCatalogService
     /// Используется для серверной верификации компонентов при создании версии.
     /// </summary>
     Task<IReadOnlyList<ChemicalDto>> GetByCidsAsync(IReadOnlyList<int> cids, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Регуляторный статус вещества по всем подключенным спискам.
+    /// Возвращает пустой список, если для вещества нет записей в справочнике.
+    /// </summary>
+    Task<ChemicalRegulationSummaryDto> GetRegulationsAsync(int cid, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Регуляторные статусы для набора веществ одним запросом.
+    /// Используется для проверки всей формуляции перед сохранением версии.
+    /// </summary>
+    Task<IReadOnlyList<ChemicalRegulationSummaryDto>> GetRegulationsBatchAsync(
+        IReadOnlyList<int> cids, CancellationToken cancellationToken = default);
 }

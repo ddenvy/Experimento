@@ -1,9 +1,10 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type ChemicalDto, type ChemicalSuggestion } from "@/lib/api";
+import { api, type ChemicalDto, type ChemicalSuggestion, type ChemicalRegulationSummaryDto } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Loader2, CheckCircle2, X, Search } from "lucide-react";
+import { RegulationBadge } from "@/components/regulations/regulation-badge";
 
 interface ChemicalPickerProps {
   value: ChemicalDto | null;
@@ -34,6 +35,7 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<SuggestStatus>("idle");
   const [resolving, setResolving] = useState<string | null>(null);
+  const [regulationSummary, setRegulationSummary] = useState<ChemicalRegulationSummaryDto | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
   // Автоподсказки с задержкой 300 мс планируются из обработчика ввода
@@ -78,6 +80,13 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
         : await api.resolveChemical(suggestion.name);
       onSelect(chemical);
       setOpen(false);
+      // Подгружаем регуляторный статус параллельно — не блокируем выбор.
+      api
+        .getChemicalRegulations(chemical.pubChemCid)
+        .then(setRegulationSummary)
+        .catch(() => {
+          /* отсутствие регуляторных данных — не фатально */
+        });
     } catch {
       setStatus("error");
     } finally {
@@ -93,6 +102,11 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
           <div className="flex items-center gap-1.5 font-medium truncate">
             <CheckCircle2 className="h-3.5 w-3.5 text-green-600 shrink-0" />
             <span className="truncate">{value.name}</span>
+            {regulationSummary && (
+              <span className="ml-1 shrink-0">
+                <RegulationBadge summary={regulationSummary} size="xs" showLabel={false} />
+              </span>
+            )}
           </div>
           <div className="text-xs text-muted-foreground mt-0.5">
             {value.formula ?? "—"} · {value.molarMass.toFixed(2)} g/mol
@@ -105,6 +119,7 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
             setQuery("");
             setSuggestions([]);
             setStatus("idle");
+            setRegulationSummary(null);
             onClear();
           }}
           className="text-muted-foreground hover:text-foreground shrink-0"

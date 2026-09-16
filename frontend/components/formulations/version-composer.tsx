@@ -1,11 +1,18 @@
 "use client";
 
 import { useState } from "react";
-import { api, type ChemicalDto, type FormulationVersionDto } from "@/lib/api";
+import {
+  api,
+  type ChemicalDto,
+  type FormulationVersionDto,
+  type ChemicalRegulationSummaryDto,
+} from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { ChemicalPicker } from "@/components/chemical-picker";
-import { Plus, Trash2 } from "lucide-react";
+import { RegulationBadge } from "@/components/regulations/regulation-badge";
+import { highestStatus } from "@/lib/regulations";
+import { Plus, Trash2, AlertTriangle, ShieldAlert } from "lucide-react";
 
 // Черновик строки компонента: вещество выбирается строго из каталога PubChem.
 interface ComponentDraft {
@@ -31,6 +38,32 @@ export function VersionComposer({
   const [notes, setNotes] = useState("");
   const [error, setError] = useState<string | null>(null);
   const [saving, setSaving] = useState(false);
+  // Регуляторные статусы для уже выбранных веществ: key = CID.
+  const [regulations, setRegulations] = useState<Record<number, ChemicalRegulationSummaryDto>>({});
+  // Подтверждение регуляторных рисков (вместо нативного confirm — он не работает в e2e и плохо тестируется).
+  const [acknowledged, setAcknowledged] = useState(false);
+
+  // Вещества с ненулевым регуляторным статусом — вычисляется на рендере.
+  const flagged = components
+    .filter((c) => c.chemical !== null)
+    .map((c) => ({
+      cid: c.chemical!.pubChemCid,
+      name: c.chemical!.name,
+      status: regulations[c.chemical!.pubChemCid]?.highestStatus,
+    }))
+    .filter((f) => f.status === "Banned" || f.status === "Restricted");
+
+  function loadRegulations(cid: number) {
+    if (regulations[cid]) return;
+    api
+      .getChemicalRegulations(cid)
+      .then((summary) =>
+        setRegulations((prev) => ({ ...prev, [cid]: summary }))
+      )
+      .catch(() => {
+        /* отсутствие регуляторных данных — не фатально */
+      });
+  }
 
   async function submit(e: React.FormEvent) {
     e.preventDefault();
@@ -43,6 +76,11 @@ export function VersionComposer({
     }
     if (components.some((c) => c.chemical === null)) {
       setError("Every component must be selected from the chemical catalog (PubChem).");
+      return;
+    }
+
+    if (flagged.length > 0 && !acknowledged) {
+      setError("Acknowledge the regulatory warnings below before creating the version.");
       return;
     }
 
@@ -86,9 +124,10 @@ export function VersionComposer({
             <div className="flex-1">
               <ChemicalPicker
                 value={c.chemical}
-                onSelect={(chemical) =>
-                  setComponents((prev) => prev.map((x, j) => (j === i ? { ...x, chemical } : x)))
-                }
+                onSelect={(chemical) => {
+                  setComponents((prev) => prev.map((x, j) => (j === i ? { ...x, chemical } : x)));
+                  loadRegulations(chemical.pubChemCid);
+                }}
                 onClear={() =>
                   setComponents((prev) => prev.map((x, j) => (j === i ? { ...x, chemical: null } : x)))
                 }
@@ -156,9 +195,74 @@ export function VersionComposer({
       </div>
       <Input placeholder="Notes (optional)" value={notes} onChange={(e) => setNotes(e.target.value)} />
       {error && <p className="text-sm text-destructive">{error}</p>}
-      <Button type="submit" disabled={saving || components.some((c) => c.chemical === null)}>
+      <RegulatorySummaryBanner flagged={flagged} />
+      {flagged.length > 0 && (
+        <label className="flex items-start gap-2 text-xs text-muted-foreground">
+          <input
+            type="checkbox"
+            className="mt-0.5"
+            checked={acknowledged}
+            onChange={(e) => setAcknowledged(e.target.checked)}
+          />
+          <span>
+            I acknowledge the regulatory warnings above and want to create this version anyway.
+          </span>
+        </label>
+      )}
+      <Button
+        type="submit"
+        disabled={saving || components.some((c) => c.chemical === null) || (flagged.length > 0 && !acknowledged)}
+      >
         Create version
       </Button>
     </form>
   );
 }
+
+/**
+ * Агрегированный баннер регуляторных рисков формуляции.
+ * Показывает количество banned/restricted веществ и их названия.
+ */
+function RegulatorySummaryBanner({
+  flagged,
+}: {
+  flagged: { cid: number; name: string; status: "Compliant" | "Restricted" | "Banned" | undefined }[];
+}) {
+  if (flagged.length === 0) {
+    return (
+      <div className="flex items-center gap-2 rounded-md border border-green-200 bg-green-50 px-3 py-2 text-xs text-green-700 dark:border-green-900 dark:bg-green-950/30 dark:text-green-300">
+        <ShieldAlert className="h-4 w-4" />
+        <span>No regulatory flags found in our database for the selected substances.</span>
+      </div>
+    );
+  }
+
+  const bannedCount = flagged.filter((f) => f.status === "Banned").length;
+  const restrictedCount = flagged.filter((f) => f.status === "Restricted").length;
+  const names = flagged.map((f) => f.name);
+
+  return (
+    <div
+      className={`flex items-start gap-2 rounded-md border px-3 py-2 text-xs ${
+        bannedCount > 0
+          ? "border-red-200 bg-red-50 text-red-700 dark:border-red-900 dark:bg-red-950/30 dark:text-red-300"
+          : "border-amber-200 bg-amber-50 text-amber-700 dark:border-amber-900 dark:bg-amber-950/30 dark:text-amber-300"
+      }`}
+    >
+      <AlertTriangle className="h-4 w-4 mt-0.5 shrink-0" />
+      <div>
+        <p className="font-medium">
+          Regulatory warning: {bannedCount > 0 && `${bannedCount} banned`}
+          {bannedCount > 0 && restrictedCount > 0 && " · "}
+          {restrictedCount > 0 && `${restrictedCount} restricted`}
+          {" "}substance{flagged.length === 1 ? "" : "s"}
+        </p>
+        <p className="opacity-80 mt-0.5">
+          {names.slice(0, 3).join(", ")}
+          {names.length > 3 ? ` and ${names.length - 3} more` : ""}
+        </p>
+      </div>
+    </div>
+  );
+}
+

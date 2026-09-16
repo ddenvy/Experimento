@@ -59,4 +59,26 @@ public class ChemicalsController : ControllerBase
             throw new NotFoundException($"Chemical with CID {cid} was not found in PubChem.");
         return Ok(chemical);
     }
+
+    /// <summary>
+    /// Регуляторный статус вещества по всем подключенным спискам (REACH SVHC, EPA PFAS, Prop 65, VOC и др.).
+    /// Возвращает пустой список, если для вещества нет записей в справочнике.
+    /// </summary>
+    [HttpGet("regulations/{cid:int}")]
+    public async Task<IActionResult> GetRegulations(int cid, CancellationToken cancellationToken)
+    {
+        var summary = await _catalog.GetRegulationsAsync(cid, cancellationToken);
+        return Ok(summary);
+    }
+
+    /// <summary>
+    /// Пакетное получение регуляторных статусов по списку CID.
+    /// </summary>
+    [HttpPost("regulations/batch")]
+    public async Task<IActionResult> GetRegulationsBatch([FromBody] int[] cids, CancellationToken cancellationToken)
+    {
+        if (cids is null || cids.Length == 0) return Ok(Array.Empty<object>());
+        var result = await _catalog.GetRegulationsBatchAsync(cids, cancellationToken);
+        return Ok(result);
+    }
 }

@@ -179,6 +179,7 @@ using (var scope = app.Services.CreateScope())
     // В Development тестовый админ создаётся всегда; в Production — только по флагу Seed:TestAdmin.
     var seedTestAdmin = app.Environment.IsDevelopment() || config.GetValue<bool>("Seed:TestAdmin");
     await DbSeeder.SeedAsync(db, seedTestAdmin);
+    await RegulationSeedData.SeedAsync(db);
 }
 
 // Pipeline

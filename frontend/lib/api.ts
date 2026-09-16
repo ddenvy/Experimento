@@ -95,6 +95,27 @@ export interface ChemicalDto {
   smiles: string | null;
 }
 
+// Регуляторные органы и статусы (mirror backend enum).
+export type RegulationAuthority =
+  | "ReachSvhc"
+  | "EpaPfas"
+  | "CaliforniaProp65"
+  | "Voc";
+export type RegulationStatus = "Compliant" | "Restricted" | "Banned";
+
+export interface ChemicalRegulationDto {
+  authority: RegulationAuthority;
+  status: RegulationStatus;
+  reason: string;
+  sourceUrl: string | null;
+}
+
+export interface ChemicalRegulationSummaryDto {
+  pubChemCid: number;
+  highestStatus: RegulationStatus;
+  regulations: ChemicalRegulationDto[];
+}
+
 // Кандидат автоподсказки: cid заполнен для каталога/CAS/формулы, null — для имени.
 export interface ChemicalSuggestion {
   pubChemCid: number | null;
@@ -453,6 +474,14 @@ export const api = {
     request<ChemicalDto>(`/chemicals/resolve?name=${encodeURIComponent(name)}`),
   resolveChemicalByCid: (cid: number) =>
     request<ChemicalDto>(`/chemicals/resolve-cid/${cid}`),
+  getChemicalRegulations: (cid: number) =>
+    request<ChemicalRegulationSummaryDto>(`/chemicals/regulations/${cid}`),
+  getChemicalRegulationsBatch: (cids: number[]) =>
+    request<ChemicalRegulationSummaryDto[]>("/chemicals/regulations/batch", {
+      method: "POST",
+      headers: { "Content-Type": "application/json" },
+      body: JSON.stringify(cids),
+    }),
 
   // Formulations
   listProjects: () => request<ProjectDto[]>("/projects"),

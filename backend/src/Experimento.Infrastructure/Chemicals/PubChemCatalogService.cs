@@ -2,7 +2,9 @@ using System.Net;
 using System.Text.Json;
 using System.Text.RegularExpressions;
 using Experimento.Application.Abstractions;
+using Experimento.Application.DTOs;
 using Experimento.Domain.Entities;
+using Experimento.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
@@ -128,6 +130,53 @@ public class PubChemCatalogService : IChemicalCatalogService
             .Where(e => cids.Contains(e.PubChemCid))
             .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles))
             .ToListAsync(cancellationToken);
+    }
+
+    /// <inheritdoc />
+    public async Task<ChemicalRegulationSummaryDto> GetRegulationsAsync(int cid, CancellationToken cancellationToken = default)
+    {
+        var regulations = await _db.ChemicalRegulations
+            .Where(r => r.ChemicalCatalogEntry.PubChemCid == cid)
+            .OrderByDescending(r => r.Status)
+            .Select(r => new ChemicalRegulationDto(r.Authority, r.Status, r.Reason, r.SourceUrl))
+            .ToListAsync(cancellationToken);
+
+        var highest = regulations.Count == 0
+            ? RegulationStatus.Compliant
+            : regulations.Max(r => r.Status);
+
+        return new ChemicalRegulationSummaryDto(cid, highest, regulations);
+    }
+
+    /// <inheritdoc />
+    public async Task<IReadOnlyList<ChemicalRegulationSummaryDto>> GetRegulationsBatchAsync(
+        IReadOnlyList<int> cids, CancellationToken cancellationToken = default)
+    {
+        if (cids.Count == 0) return Array.Empty<ChemicalRegulationSummaryDto>();
+
+        var grouped = await _db.ChemicalRegulations
+            .Where(r => cids.Contains(r.ChemicalCatalogEntry.PubChemCid))
+            .Select(r => new
+            {
+                r.ChemicalCatalogEntry.PubChemCid,
+                r.Authority,
+                r.Status,
+                r.Reason,
+                r.SourceUrl,
+            })
+            .ToListAsync(cancellationToken);
+
+        var byCid = grouped.GroupBy(r => r.PubChemCid).ToDictionary(
+            g => g.Key,
+            g => g.Select(r => new ChemicalRegulationDto(r.Authority, r.Status, r.Reason, r.SourceUrl)).ToList()
+                as IReadOnlyList<ChemicalRegulationDto>);
+
+        return cids.Select(cid =>
+        {
+            var regs = byCid.TryGetValue(cid, out var list) ? list : Array.Empty<ChemicalRegulationDto>();
+            var highest = regs.Count == 0 ? RegulationStatus.Compliant : regs.Max(r => r.Status);
+            return new ChemicalRegulationSummaryDto(cid, highest, regs);
+        }).ToList();
     }
 
     // --- Источники автоподсказок -------------------------------------------------
