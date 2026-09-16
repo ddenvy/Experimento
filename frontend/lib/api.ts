@@ -210,6 +210,55 @@ export interface AuditIntegrityDto {
   firstBrokenId: number | null;
 }
 
+// Сводки истории прогонов по версии.
+export interface PredictionRunSummaryDto {
+  jobId: string;
+  resultId: string | null;
+  status: string;
+  modelDisplayName: string;
+  successProbability: number;
+  toxicityScore: number;
+  stabilityScore: number;
+  sideRiskLevel: string;
+  hasOutcome: boolean;
+  createdAtUtc: string;
+}
+
+export interface SimulationRunSummaryDto {
+  jobId: string;
+  resultId: string | null;
+  status: string;
+  iterationsExecuted: number;
+  bestSuccessProbability: number | null;
+  bestScore: number | null;
+  createdAtUtc: string;
+}
+
+export interface CalibrationStatsDto {
+  total: number;
+  withOutcome: number;
+  meanError: number;
+  meanBias: number;
+}
+
+export interface RecentRunDto {
+  kind: "prediction" | "simulation";
+  jobId: string;
+  status: string;
+  projectId: string;
+  projectName: string;
+  formulationId: string;
+  formulationName: string;
+  versionNumber: number;
+  metric: number | null;
+  createdAtUtc: string;
+}
+
+export interface MeDto {
+  id: string;
+  email: string;
+}
+
 export interface SubmitSimulationInput {
   iterations: number;
   varyConcentrations: boolean;
@@ -346,6 +395,7 @@ export const api = {
 
   // Formulations
   listProjects: () => request<ProjectDto[]>("/projects"),
+  getProject: (projectId: string) => request<ProjectDto>(`/projects/${projectId}`),
   createProject: (data: { name: string; description?: string }) =>
     request<ProjectDto>("/projects", { method: "POST", body: JSON.stringify(data) }),
 
@@ -368,10 +418,13 @@ export const api = {
   // Predictions
   submitPrediction: (versionId: string) =>
     request<JobDto>(`/predictions/formulation-versions/${versionId}/predictions`, { method: "POST" }),
+  listPredictionRuns: (versionId: string) =>
+    request<PredictionRunSummaryDto[]>(`/predictions/formulation-versions/${versionId}/predictions`),
   getPredictionJob: (jobId: string) =>
     request<JobDto>(`/predictions/prediction-jobs/${jobId}`),
   getPredictionResult: (jobId: string) =>
     request<PredictionResultDto>(`/predictions/prediction-jobs/${jobId}/result`),
+  getCalibration: () => request<CalibrationStatsDto>("/predictions/calibration"),
 
   // Simulations
   submitSimulation: (versionId: string, data: SubmitSimulationInput) =>
@@ -383,6 +436,8 @@ export const api = {
     request<JobDto>(`/simulations/simulation-jobs/${jobId}`),
   getSimulationResult: (jobId: string) =>
     request<SimulationResultDto>(`/simulations/simulation-jobs/${jobId}/result`),
+  listSimulationRuns: (versionId: string) =>
+    request<SimulationRunSummaryDto[]>(`/simulations/formulation-versions/${versionId}/simulations`),
 
   // Models
   listModels: () => request<unknown[]>("/models"),
@@ -426,6 +481,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify({ query, projectId }),
     }),
+
+  // Activity / profile
+  getRecentRuns: () => request<RecentRunDto[]>("/activity/recent-runs"),
+  getMe: () => request<MeDto>("/auth/me"),
 
   // Audit
   getAuditTrail: (entityType?: string, entityId?: string) =>

@@ -128,6 +128,9 @@ builder.Services.AddRateLimiter(options =>
 {
     options.RejectionStatusCode = StatusCodes.Status429TooManyRequests;
 
+    // Лимит auth-эндпоинтов конфигурируем (тестовое окружение делает много логинов подряд).
+    var authPermitLimit = builder.Configuration.GetValue("RateLimits:AuthPermitPerMinute", 20);
+
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
     {
         var path = httpContext.Request.Path;
@@ -146,7 +149,7 @@ builder.Services.AddRateLimiter(options =>
                 _ => new FixedWindowRateLimiterOptions
                 {
                     Window = TimeSpan.FromMinutes(1),
-                    PermitLimit = 20,
+                    PermitLimit = authPermitLimit,
                     QueueLimit = 0
                 })
             : RateLimitPartition.GetTokenBucketLimiter(

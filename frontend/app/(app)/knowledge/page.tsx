@@ -1,7 +1,7 @@
 "use client";
 
 import { useCallback, useEffect, useRef, useState } from "react";
-import { api, type KnowledgeDocumentDto, type SearchResultDto } from "@/lib/api";
+import { api, type KnowledgeDocumentDto, type ProjectDto, type SearchResultDto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -42,6 +42,10 @@ export default function KnowledgePage() {
 
   const [documents, setDocuments] = useState<KnowledgeDocumentDto[]>([]);
 
+  // Контекст проекта: пустое значение = глобальная общая библиотека.
+  const [projects, setProjects] = useState<ProjectDto[]>([]);
+  const [projectId, setProjectId] = useState<string>("");
+
   // Общие поля формы.
   const [sourceType, setSourceType] = useState<string>(SOURCE_TYPES[1]);
   const [reference, setReference] = useState("");
@@ -56,7 +60,11 @@ export default function KnowledgePage() {
   const [uploadError, setUploadError] = useState<string | null>(null);
 
   const loadDocuments = useCallback(() => {
-    api.listDocuments().then(setDocuments).catch(() => {});
+    api.listDocuments(projectId || undefined).then(setDocuments).catch(() => {});
+  }, [projectId]);
+
+  useEffect(() => {
+    api.listProjects().then(setProjects).catch(() => {});
   }, []);
 
   useEffect(() => {
@@ -92,7 +100,11 @@ export default function KnowledgePage() {
         if (file.size > MAX_FILE_BYTES)
           throw new Error("File must be 10 MB or smaller.");
         setUploading(true);
-        await api.uploadDocumentFile(file, { sourceType, reference: reference.trim() || undefined });
+        await api.uploadDocumentFile(file, {
+          sourceType,
+          reference: reference.trim() || undefined,
+          projectId: projectId || undefined,
+        });
       } else {
         if (!title.trim()) throw new Error("Title is required.");
         if (!content.trim()) throw new Error("Document content is required.");
@@ -104,6 +116,7 @@ export default function KnowledgePage() {
           sourceType,
           reference: reference.trim(),
           content,
+          projectId: projectId || undefined,
         });
       }
       resetForm();
@@ -121,7 +134,7 @@ export default function KnowledgePage() {
     setSearching(true);
     setSearchError(null);
     try {
-      setResults(await api.searchKnowledge(query.trim()));
+      setResults(await api.searchKnowledge(query.trim(), projectId || undefined));
     } catch (err) {
       setResults([]);
       setSearchError(err instanceof Error ? err.message : "Search failed.");
@@ -132,7 +145,30 @@ export default function KnowledgePage() {
 
   return (
     <div className="space-y-6">
-      <h1 className="text-2xl font-bold">Knowledge Base</h1>
+      <div className="flex flex-wrap items-end justify-between gap-3">
+        <h1 className="text-2xl font-bold">Knowledge Base</h1>
+        <div>
+          <label className="mr-2 text-xs text-muted-foreground" htmlFor="kb-scope">
+            Scope
+          </label>
+          <select
+            id="kb-scope"
+            className="h-10 rounded-md border border-input bg-background px-3 text-sm"
+            value={projectId}
+            onChange={(e) => {
+              setProjectId(e.target.value);
+              setResults([]);
+            }}
+          >
+            <option value="">Global library (shared)</option>
+            {projects.map((p) => (
+              <option key={p.id} value={p.id}>
+                {p.name}
+              </option>
+            ))}
+          </select>
+        </div>
+      </div>
 
       <Card>
         <CardHeader>

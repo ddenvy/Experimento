@@ -119,6 +119,35 @@ public class FullFlowTests : IClassFixture<ApiFixture>
         Assert.InRange(result.SuccessProbability, 0.0, 1.0);
         Assert.False(string.IsNullOrEmpty(result.SideRiskLevel));
 
+        // --- 7b. Run history for the version contains the prediction run ---
+        // Результат сохраняется до финального статуса job, поэтому дожидаемся терминального
+        // статуса; конкретный Completed не проверяем — внешний эмбеддинг-провайдер может
+        // транзиторно падать на стадии rationale (это не связано с эндпоинтом истории).
+        PredictionRunSummary? run = null;
+        for (var i = 0; i < 10; i++)
+        {
+            var historyResp = await _client.GetAsync($"/api/predictions/formulation-versions/{versionId}/predictions");
+            Assert.True(historyResp.IsSuccessStatusCode, $"Prediction history failed: {historyResp.StatusCode}");
+            var historyNow = await historyResp.Content.ReadFromJsonAsync<List<PredictionRunSummary>>(JsonOpts);
+            Assert.NotNull(historyNow);
+            run = historyNow.SingleOrDefault(r => r.JobId == jobId);
+            if (run is not null && (run.Status == "Completed" || run.Status == "Failed")) break;
+            await Task.Delay(1000);
+        }
+        Assert.NotNull(run);
+        Assert.NotNull(run.ResultId);
+
+        // Simulation history endpoint works even when no simulations were run.
+        var simHistoryResp = await _client.GetAsync($"/api/simulations/formulation-versions/{versionId}/simulations");
+        Assert.True(simHistoryResp.IsSuccessStatusCode, $"Simulation history failed: {simHistoryResp.StatusCode}");
+        var simHistory = await simHistoryResp.Content.ReadFromJsonAsync<List<SimulationRunSummary>>(JsonOpts);
+        Assert.NotNull(simHistory);
+        Assert.Empty(simHistory);
+
+        // History of a foreign/unknown version is forbidden, not leaked.
+        var foreignResp = await _client.GetAsync($"/api/predictions/formulation-versions/{Guid.NewGuid()}/predictions");
+        Assert.Equal(System.Net.HttpStatusCode.Forbidden, foreignResp.StatusCode);
+
         // --- 8. Audit trail is Admin-only: log in as the seeded admin and verify entries ---
         var adminResp = await _client.PostAsJsonAsync("/api/auth/login",
             new { email = "apple@apple.com", password = "Test12345!" });
@@ -167,6 +196,8 @@ public class FullFlowTests : IClassFixture<ApiFixture>
     private record RationaleItemDto(string Id, string Category, string Claim, string Explanation, double Confidence,
         List<RationaleSourceDto> Sources);
     private record RationaleSourceDto(string Title, string Reference, string Type, double Similarity);
+    private record PredictionRunSummary(string JobId, string? ResultId, string Status);
+    private record SimulationRunSummary(string JobId);
     private record AuditEntry(string Action, string EntityType, string EntityId);
     private record ErrorBody(string Error);
 }

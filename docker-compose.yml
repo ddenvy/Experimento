@@ -51,6 +51,8 @@ services:
       Cors__Origins__0: ${FRONTEND_ORIGIN:-http://localhost:3000}
       # Локальный compose используется для разработки/e2e — сеем тестового админа.
       Seed__TestAdmin: "true"
+      # E2E делает много последовательных логинов с одного IP; прод-дефолт 20/мин.
+      RateLimits__AuthPermitPerMinute: "200"
       Ai__Provider: gemini
       Ai__Gemini__ApiKey: ${GEMINI_API_KEY:-}
       Ai__Gemini__ChatModel: gemini-3.5-flash-lite

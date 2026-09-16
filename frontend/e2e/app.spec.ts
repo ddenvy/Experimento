@@ -20,10 +20,10 @@ test.describe("Authenticated workflow", () => {
     await injectAuth(page, cookies);
   });
 
-  test("dashboard shows stat cards", async ({ page }) => {
+  test("dashboard shows real stat cards", async ({ page }) => {
     await page.goto("/dashboard");
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
-    const labels = ["Formulations", "Predictions", "Simulations", "Audit Integrity"];
+    const labels = ["Projects", "Predictions run", "Lab outcomes", "Documents indexed"];
     for (const label of labels) {
       await expect(page.getByRole("heading", { name: label })).toBeVisible();
     }
@@ -31,99 +31,177 @@ test.describe("Authenticated workflow", () => {
 
   test("sidebar navigation links are present", async ({ page }) => {
     await page.goto("/dashboard");
-    const links = ["Dashboard", "Formulations", "Predictions", "Simulations", "Knowledge Base", "Audit Trail"];
+    const links = ["Dashboard", "Projects", "Knowledge Base", "Audit Trail"];
     for (const link of links) {
-      await expect(page.getByRole("link", { name: link })).toBeVisible();
+      await expect(page.getByRole("navigation").getByRole("link", { name: link, exact: true })).toBeVisible();
     }
   });
 
-  test("formulations page: create project → formulation → version", async ({ page }) => {
+  test("legacy tool routes redirect to projects", async ({ page }) => {
     await page.goto("/formulations");
-    await expect(page.getByRole("heading", { name: "Formulations" })).toBeVisible();
+    await expect(page).toHaveURL(/\/projects$/);
+    await page.goto("/predictions");
+    await expect(page).toHaveURL(/\/projects$/);
+    await page.goto("/simulations");
+    await expect(page).toHaveURL(/\/projects$/);
+  });
 
-    // --- Create a project ---
-    await page.getByRole("button", { name: "New project" }).click();
-    await page.getByPlaceholder("Project name").fill(`E2E Project ${Date.now()}`);
+  test("golden path: project → formulation → version → prediction → simulation", async ({ page }) => {
+    test.setTimeout(90_000);
+    const marker = Date.now();
+    const projectName = `E2E Project ${marker}`;
+    const formName = `E2E Form ${marker}`;
+
+    // --- Create a project on /projects ---
+    await page.goto("/projects");
+    await expect(page.getByRole("heading", { name: "Projects" })).toBeVisible();
+    await page.getByRole("button", { name: "New project" }).first().click();
+    await page.getByPlaceholder("Project name").fill(projectName);
     await page.getByRole("button", { name: "Create" }).click();
-    // The project should now be selected in the dropdown
-    const select = page.locator("select").first();
-    await expect(select).toHaveValue(/^.+$/, { timeout: 5000 });
+    await page
+      .locator('a[href^="/projects/"]', { hasText: projectName })
+      .click({ timeout: 5000 });
 
-    // --- Create a formulation ---
-    await page.getByRole("button", { name: "New formulation" }).click();
-    const formName = `E2E Form ${Date.now()}`;
+    // --- Project detail: create a formulation ---
+    await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+$/);
+    await expect(page.getByRole("heading", { name: projectName })).toBeVisible();
+    await page.getByRole("button", { name: "New formulation" }).first().click();
     await page.getByPlaceholder("Name").fill(formName);
     await page.getByPlaceholder("Target purpose").fill("Test solubility");
     await page.getByRole("button", { name: "Create" }).click();
-    await expect(page.getByText(formName)).toBeVisible();
 
-    // --- Expand the formulation and create a version ---
+    // --- Open formulation detail, create the first version on Composition tab ---
+    await page
+      .locator('a[href*="/formulations/"]', { hasText: formName })
+      .click({ timeout: 5000 });
+    await expect(page.getByRole("heading", { name: formName })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Composition" })).toBeVisible();
+
     await page.getByRole("button", { name: "New version" }).click();
 
-    // Компонент выбирается строго из каталога PubChem: вводим запрос, выбираем "aspirin".
+    // Компонент выбирается строго из каталога PubChem.
     const chemicalInput = page.getByPlaceholder("Search by name, formula or CAS…");
     await chemicalInput.fill("asp");
     await page.getByRole("option", { name: /aspirin/i }).first().click({ timeout: 20000 });
-    // После резолва появляется плашка с CID и молекулярной массой.
     await expect(page.getByText(/CID 2244/)).toBeVisible({ timeout: 20000 });
 
     await page.getByPlaceholder("Proportion").fill("1.0");
     await page.getByPlaceholder("Role (optional)").fill("Active");
     await page.getByRole("button", { name: "Create version" }).click();
-    // Version card should appear
     await expect(page.getByText("v1")).toBeVisible({ timeout: 15000 });
+
+    // --- Predictions tab: version is already in context (no triple selector) ---
+    await page.getByRole("tab", { name: "Predictions" }).click();
+    const versionSelect = page.getByLabel("Select version");
+    await expect(versionSelect.locator("option")).toHaveCount(1);
+    const selectedVersionId = await versionSelect.inputValue();
+    await expect(page.getByRole("heading", { name: "Run history" })).toBeVisible();
+
+    await page.getByRole("button", { name: "Predict" }).click();
+    await expect(page.getByRole("heading", { name: "Prediction result" })).toBeVisible({
+      timeout: 45000,
+    });
+    // Завершённый прогон появляется в истории.
+    await expect(page.getByText("Completed", { exact: true }).first()).toBeVisible();
+
+    // --- Flow button leads to the Simulations tab with the same version ---
+    await page.getByRole("button", { name: /Continue: run simulation/ }).click();
+    await expect(page).toHaveURL(/tab=simulations/);
+    await expect(page.getByRole("heading", { name: "Run simulation" })).toBeVisible();
+    await expect(page.getByLabel("Select version")).toHaveValue(selectedVersionId);
   });
 
-  test("predictions page: cascading dropdowns and run prediction", async ({ page, request }) => {
-    // Create a project + formulation + version via API so the test is deterministic
+  test("command palette navigates to a project", async ({ page, request }) => {
     const authHeader = { Authorization: `Bearer ${token}` };
-    const project = await (await request.post("http://localhost:5126/api/projects", {
-      data: { name: `PredTest ${Date.now()}`, description: "for prediction test" },
-      headers: authHeader,
-    })).json();
-    const formulation = await (await request.post("http://localhost:5126/api/formulations", {
-      data: { projectId: project.id, name: "Pred Formulation", targetPurpose: "test" },
-      headers: authHeader,
-    })).json();
-    // Резолвим вещество в каталоге PubChem, чтобы получить CID для компонента.
-    const aspirin = await (await request.get(
-      "http://localhost:5126/api/chemicals/resolve?name=aspirin",
-      { headers: authHeader },
-    )).json();
-    const versionResp = await request.post(`http://localhost:5126/api/formulations/${formulation.id}/versions`, {
-      data: {
-        components: [{
-          pubChemCid: aspirin.pubChemCid,
-          chemicalName: aspirin.name,
-          casNumber: aspirin.casNumber,
-          formula: aspirin.formula,
-          molarMass: aspirin.molarMass,
-          proportion: 1.0,
-          role: "Active",
-        }],
-        conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
-      },
-      headers: authHeader,
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Palette ${Date.now()}`, description: "palette test" },
+        headers: authHeader,
+      })
+    ).json();
+
+    await page.goto("/dashboard");
+    // Открываем палитру её кнопкой (клавиатурный ярлык — то же действие).
+    await page.getByTestId("cmdk-trigger").click();
+    const paletteInput = page.getByPlaceholder("Search pages, projects, formulations…");
+    await expect(paletteInput).toBeVisible();
+    await paletteInput.fill(project.name);
+    await expect(page.getByRole("button", { name: new RegExp(project.name) })).toBeVisible({
+      timeout: 10000,
     });
+    await paletteInput.press("Enter");
+    await expect(page).toHaveURL(new RegExp(`/projects/${project.id}$`));
+  });
+
+  test("mobile drawer exposes navigation", async ({ page }) => {
+    await page.setViewportSize({ width: 390, height: 844 });
+    await page.goto("/dashboard");
+    const navProjects = page
+      .getByRole("navigation")
+      .getByRole("link", { name: "Projects", exact: true });
+    await expect(navProjects).toHaveCount(0);
+
+    await page.getByRole("button", { name: "Open navigation menu" }).click();
+    await expect(navProjects).toBeVisible();
+    await navProjects.click();
+    await expect(page).toHaveURL(/\/projects$/);
+  });
+
+  test("prediction history keeps completed runs viewable", async ({ page, request }) => {
+    test.setTimeout(90_000);
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `HistTest ${Date.now()}`, description: "history test" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: "Hist Formulation", targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+    const versionResp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      }
+    );
     expect(versionResp.ok()).toBeTruthy();
 
-    await page.goto("/predictions");
-    await expect(page.getByRole("heading", { name: "Property Predictions" })).toBeVisible();
-
-    const selects = page.locator("select");
-    await expect(selects).toHaveCount(3);
-
-    // Select the project we just created by label
-    await selects.nth(0).selectOption({ label: project.name });
-    await selects.nth(1).selectOption({ label: "Pred Formulation" });
-    // Wait for the version to load
-    await expect(selects.nth(2).locator("option")).toHaveCount(2, { timeout: 10000 });
-    await selects.nth(2).selectOption({ index: 1 });
-
-    // Run prediction
+    await page.goto(
+      `/projects/${project.id}/formulations/${formulation.id}?tab=predictions`
+    );
     await page.getByRole("button", { name: "Predict" }).click();
-    await expect(page.getByText("Prediction result")).toBeVisible({ timeout: 30000 });
-    await expect(page.getByText(/Success/)).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Prediction result" })).toBeVisible({
+      timeout: 45000,
+    });
+
+    // Повторный заход на страницу показывает сохранённую историю без нового прогона.
+    await page.reload();
+    await expect(page.getByTestId("prediction-history")).toContainText("Completed");
+    await page.getByText("Completed", { exact: true }).first().click();
+    await expect(page.getByRole("heading", { name: "Prediction result" })).toBeVisible();
   });
 
   test("audit trail page lists entries and supports integrity check", async ({ page }) => {
@@ -148,13 +226,12 @@ test.describe("Authenticated workflow", () => {
     await page.getByRole("button", { name: "Index document" }).click();
 
     // Документ появляется в списке и доходит до Ready (поллинг на странице каждые 2 секунды).
-    // В DOM статус "Ready" (визуально он uppercase через CSS), поэтому ищем в mixed-case.
     await expect(page.getByText(docTitle)).toBeVisible({ timeout: 10000 });
     await expect(page.locator("li").filter({ hasText: docTitle }).getByText("Ready", { exact: true })).toBeVisible({ timeout: 30000 });
 
     // Семантический поиск находит содержимое документа по смыслу, а не по словам.
     await page.getByPlaceholder("Search literature, tables and internal notes…").fill("what compound makes coffee keep you awake");
-    await page.getByRole("button", { name: "Search" }).click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible({ timeout: 20000 });
     await expect(page.getByText(/Caffeine is a central nervous system stimulant/).first()).toBeVisible();
   });
@@ -171,10 +248,8 @@ test.describe("Authenticated workflow", () => {
       "",
     ].join("\n");
 
-    // Уникальное имя файла: документы глобальны и видны между прогонами, поэтому одинаковое
-    // имя вызвало бы strict-mode неоднозначность в списке.
+    // Уникальное имя файла: документы глобальны и видны между прогонами.
     const fileName = `${marker}.csv`;
-    // Скрытый input[type=file] принимает файл программно.
     await page.locator('input[type="file"]').setInputFiles({
       name: fileName,
       mimeType: "text/csv",
@@ -190,10 +265,9 @@ test.describe("Authenticated workflow", () => {
 
     // Поиск "по смыслу" находит разобранную строку таблицы (пары заголовок: значение).
     // Документы глобальны и накапливаются между прогонами: идентичные строки из прошлых
-    // загрузок имеют ту же близость, поэтому проверяем паттерн любой E2E-загрузки,
-    // а готовность именно текущего документа подтвердили выше по уникальному имени.
+    // загрузок имеют ту же близость, поэтому проверяем паттерн любой E2E-загрузки.
     await page.getByPlaceholder("Search literature, tables and internal notes…").fill("what medicine helps bring down a fever");
-    await page.getByRole("button", { name: "Search" }).click();
+    await page.getByRole("button", { name: "Search", exact: true }).click();
     await expect(page.getByRole("heading", { name: "Results" })).toBeVisible({ timeout: 20000 });
     await expect(page.getByText(/compound: E2ETable\d+ paracetamol/).first()).toBeVisible();
   });

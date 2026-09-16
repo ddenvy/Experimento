@@ -1,21 +1,52 @@
+"use client";
+
+import { useEffect, useState } from "react";
+import Link from "next/link";
+import {
+  api,
+  type ProjectDto,
+  type CalibrationStatsDto,
+  type RecentRunDto,
+  type KnowledgeDocumentDto,
+} from "@/lib/api";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
-import { FlaskConical, Brain, Activity, ShieldCheck } from "lucide-react";
+import { buttonVariants } from "@/components/ui/button";
+import { RunStatusBadge } from "@/components/runs/run-status-badge";
+import { formatDateTime, formatPercent } from "@/lib/format";
+import { FolderKanban, Brain, FlaskConical, BookOpen, ArrowRight, Plus } from "lucide-react";
 
 export default function DashboardPage() {
+  const [projects, setProjects] = useState<ProjectDto[] | null>(null);
+  const [calibration, setCalibration] = useState<CalibrationStatsDto | null>(null);
+  const [recent, setRecent] = useState<RecentRunDto[] | null>(null);
+  const [documents, setDocuments] = useState<KnowledgeDocumentDto[] | null>(null);
+
+  useEffect(() => {
+    api.listProjects().then(setProjects).catch(() => setProjects([]));
+    api.getCalibration().then(setCalibration).catch(() => null);
+    api.getRecentRuns().then(setRecent).catch(() => setRecent([]));
+    api.listDocuments().then(setDocuments).catch(() => setDocuments([]));
+  }, []);
+
   const stats = [
-    { label: "Formulations", value: "12", icon: FlaskConical, hint: "+3 this week" },
-    { label: "Predictions", value: "47", icon: Brain, hint: "avg. 78% success" },
-    { label: "Simulations", value: "23", icon: Activity, hint: "all completed" },
-    { label: "Audit Integrity", value: "100%", icon: ShieldCheck, hint: "chain intact" },
+    { label: "Projects", value: projects?.length ?? "—", icon: FolderKanban },
+    { label: "Predictions run", value: calibration?.total ?? "—", icon: Brain },
+    { label: "Lab outcomes", value: calibration?.withOutcome ?? "—", icon: FlaskConical },
+    { label: "Documents indexed", value: documents?.length ?? "—", icon: BookOpen },
   ];
 
   return (
     <div className="space-y-8">
-      <div>
-        <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
-        <p className="text-muted-foreground mt-1">
-          Design formulations, predict properties, simulate outcomes — every step audited.
-        </p>
+      <div className="flex flex-wrap items-end justify-between gap-4">
+        <div>
+          <h1 className="text-3xl font-bold tracking-tight">Dashboard</h1>
+          <p className="mt-1 text-muted-foreground">
+            Pick up where you left off — your latest formulation runs at a glance.
+          </p>
+        </div>
+        <Link href="/projects" className={buttonVariants()}>
+          <Plus className="h-4 w-4" /> New project
+        </Link>
       </div>
 
       <div className="grid gap-4 sm:grid-cols-2 lg:grid-cols-4">
@@ -29,7 +60,6 @@ export default function DashboardPage() {
               </CardHeader>
               <CardContent>
                 <div className="text-2xl font-bold">{s.value}</div>
-                <p className="text-xs text-muted-foreground mt-1">{s.hint}</p>
               </CardContent>
             </Card>
           );
@@ -39,41 +69,78 @@ export default function DashboardPage() {
       <div className="grid gap-4 lg:grid-cols-2">
         <Card>
           <CardHeader>
-            <CardTitle>Recent activity</CardTitle>
+            <CardTitle>Recent runs</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-3 text-sm">
-            <div className="flex justify-between">
-              <span>Prediction job #a1f2… completed</span>
-              <span className="text-muted-foreground">2m ago</span>
-            </div>
-            <div className="flex justify-between">
-              <span>New formulation version v3 for Project A</span>
-              <span className="text-muted-foreground">18m ago</span>
-            </div>
-            <div className="flex justify-between">
-              <span>Audit chain verified — intact</span>
-              <span className="text-muted-foreground">1h ago</span>
-            </div>
+          <CardContent>
+            {recent === null ? (
+              <p className="text-sm text-muted-foreground">Loading…</p>
+            ) : recent.length === 0 ? (
+              <p className="text-sm text-muted-foreground">
+                No runs yet. Open a formulation and run your first prediction.
+              </p>
+            ) : (
+              <ul className="divide-y">
+                {recent.map((run) => (
+                  <li key={`${run.kind}-${run.jobId}`}>
+                    <Link
+                      href={`/projects/${run.projectId}/formulations/${run.formulationId}?tab=${
+                        run.kind === "prediction" ? "predictions" : "simulations"
+                      }`}
+                      className="flex items-center gap-3 py-2.5 text-sm hover:bg-muted/40"
+                    >
+                      <RunStatusBadge status={run.status} />
+                      <span className="min-w-0 flex-1">
+                        <span className="block truncate font-medium">
+                          {run.formulationName} · v{run.versionNumber}
+                        </span>
+                        <span className="block truncate text-xs text-muted-foreground">
+                          {run.kind === "prediction" ? "Prediction" : "Simulation"} · {run.projectName}
+                          {run.metric != null && ` · ${formatPercent(run.metric, 1)} success`}
+                        </span>
+                      </span>
+                      <span className="shrink-0 text-xs text-muted-foreground">
+                        {formatDateTime(run.createdAtUtc)}
+                      </span>
+                    </Link>
+                  </li>
+                ))}
+              </ul>
+            )}
           </CardContent>
         </Card>
 
         <Card>
           <CardHeader>
-            <CardTitle>Compliance status</CardTitle>
+            <CardTitle>Quick access</CardTitle>
           </CardHeader>
-          <CardContent className="space-y-2 text-sm">
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-green-600" />
-              <span>ALCOA+ audit trail active</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-green-600" />
-              <span>Model version recorded per prediction</span>
-            </div>
-            <div className="flex items-center gap-2">
-              <ShieldCheck className="h-4 w-4 text-green-600" />
-              <span>Explainable rationale for every score</span>
-            </div>
+          <CardContent className="space-y-3">
+            <Link
+              href="/projects"
+              className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-muted/40"
+            >
+              <span className="flex items-center gap-2">
+                <FolderKanban className="h-4 w-4 text-muted-foreground" /> Projects &amp; formulations
+              </span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            <Link
+              href="/knowledge"
+              className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-muted/40"
+            >
+              <span className="flex items-center gap-2">
+                <BookOpen className="h-4 w-4 text-muted-foreground" /> Knowledge Base
+              </span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            {calibration && calibration.withOutcome > 0 && (
+              <div className="rounded-md border p-3 text-sm text-muted-foreground">
+                Prediction calibration: mean absolute error{" "}
+                <span className="font-medium text-foreground">
+                  {formatPercent(calibration.meanError, 1)}
+                </span>{" "}
+                across {calibration.withOutcome} lab outcome{calibration.withOutcome === 1 ? "" : "s"}.
+              </div>
+            )}
           </CardContent>
         </Card>
       </div>

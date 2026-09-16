@@ -36,3 +36,10 @@ public record PredictionRunSummaryDto(
 public record SimulationRunSummaryDto(
     Guid JobId, Guid? ResultId, string Status, int IterationsExecuted,
     double? BestSuccessProbability, double? BestScore, DateTime CreatedAtUtc);
+
+// Сводка последних прогонов пользователя для командного центра (дашборда).
+public record RecentRunDto(
+    string Kind, Guid JobId, string Status,
+    Guid ProjectId, string ProjectName,
+    Guid FormulationId, string FormulationName, int VersionNumber,
+    double? Metric, DateTime CreatedAtUtc);
