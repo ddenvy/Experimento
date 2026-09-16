@@ -16,7 +16,8 @@ public record RationaleItemDto(Guid Id, string Category, string Claim, string Ex
 public record PredictionResultDto(
     Guid Id, Guid JobId, Guid ModelRegistrationId, string ModelDisplayName,
     double SuccessProbability, double ToxicityScore, double StabilityScore, string SideRiskLevel,
-    string Summary, IReadOnlyList<RationaleItemDto> RationaleItems);
+    string Summary, IReadOnlyList<RationaleItemDto> RationaleItems,
+    IReadOnlyList<ReviewDto> Reviews, OutcomeDto? Outcome);
 public record ReviewDto(Guid Id, string Decision, string? Comment, DateTime CreatedAtUtc);
 public record OutcomeDto(Guid Id, bool ActualSuccess, string ActualMetricsJson, string? Notes, DateTime RecordedAtUtc);
 public record SimulationJobDto(Guid Id, Guid VersionId, string Status, int Progress, DateTime CreatedAtUtc);
@@ -27,6 +28,11 @@ public record KnowledgeDocumentDto(Guid Id, string Title, string SourceType, str
 public record SearchResultDto(Guid ChunkId, string DocumentTitle, string Reference, string SourceType, string Content, double Similarity);
 public record AuditEntryDto(long Id, DateTime TimestampUtc, Guid? ActorUserId, string Action, string EntityType, string? EntityId);
 public record CalibrationStatsDto(int Total, int WithOutcome, double MeanError, double MeanBias);
+
+// Качество зарегистрированной модели по внесённым лабораторным исходам (Model Scorecard).
+public record ModelScorecardDto(
+    Guid ModelId, string DisplayName, string Version, string ContextOfUse,
+    int Total, int WithOutcome, double MeanError, double MeanBias);
 
 // Сводки истории прогонов по версии формуляции (без тяжёлых rationale/кандидатов).
 public record PredictionRunSummaryDto(

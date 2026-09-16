@@ -2,7 +2,7 @@
 
 import { useCallback, useEffect, useMemo, useRef, useState } from "react";
 import { useRouter } from "next/navigation";
-import { LayoutDashboard, FolderKanban, BookOpen, ScrollText, FlaskConical, Search } from "lucide-react";
+import { LayoutDashboard, FolderKanban, BookOpen, ScrollText, FlaskConical, Gauge, Search } from "lucide-react";
 import { api, type ProjectDto, type FormulationDto } from "@/lib/api";
 
 interface PaletteEntry {
@@ -17,6 +17,7 @@ const STATIC_ENTRIES: PaletteEntry[] = [
   { id: "nav-dashboard", label: "Dashboard", hint: "Page", href: "/dashboard", icon: LayoutDashboard },
   { id: "nav-projects", label: "Projects", hint: "Page", href: "/projects", icon: FolderKanban },
   { id: "nav-knowledge", label: "Knowledge Base", hint: "Page", href: "/knowledge", icon: BookOpen },
+  { id: "nav-models", label: "Model Scorecard", hint: "Page", href: "/models", icon: Gauge },
   { id: "nav-audit", label: "Audit Trail", hint: "Page", href: "/audit", icon: ScrollText },
 ];
 

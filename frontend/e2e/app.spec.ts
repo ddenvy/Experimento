@@ -31,7 +31,7 @@ test.describe("Authenticated workflow", () => {
 
   test("sidebar navigation links are present", async ({ page }) => {
     await page.goto("/dashboard");
-    const links = ["Dashboard", "Projects", "Knowledge Base", "Audit Trail"];
+    const links = ["Dashboard", "Projects", "Knowledge Base", "Model Scorecard", "Audit Trail"];
     for (const link of links) {
       await expect(page.getByRole("navigation").getByRole("link", { name: link, exact: true })).toBeVisible();
     }
@@ -202,6 +202,189 @@ test.describe("Authenticated workflow", () => {
     await expect(page.getByTestId("prediction-history")).toContainText("Completed");
     await page.getByText("Completed", { exact: true }).first().click();
     await expect(page.getByRole("heading", { name: "Prediction result" })).toBeVisible();
+  });
+
+  test("lab journal: review and lab outcome persist and feed the scorecard", async ({ page, request }) => {
+    test.setTimeout(90_000);
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Outcome ${marker}`, description: "outcome e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Outcome Form ${marker}`, targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+    const versionResp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      }
+    );
+    expect(versionResp.ok()).toBeTruthy();
+
+    await page.goto(
+      `/projects/${project.id}/formulations/${formulation.id}?tab=predictions`
+    );
+    await page.getByRole("button", { name: "Predict" }).click();
+    await expect(page.getByRole("heading", { name: "Prediction result" })).toBeVisible({
+      timeout: 45000,
+    });
+
+    // --- Review: комментарий и отправка ---
+    await page.getByLabel("Review comment").fill("E2E approved");
+    await page.getByTestId("submit-review").click();
+    await expect(page.getByTestId("review-list")).toContainText("Approved", { timeout: 10000 });
+
+    // --- Lab outcome: фактический успех + наблюдаемая токсичность + заметки ---
+    await page.getByLabel("Observed toxicity").fill("0.2");
+    await page.getByLabel("Lab notes").fill("E2E lab outcome");
+    await page.getByTestId("save-outcome").click();
+    // После первой сохранённой записи кнопка становится "Update outcome"...
+    await expect(page.getByRole("button", { name: "Update outcome" })).toBeVisible({ timeout: 10000 });
+    // ...а в истории у прогона появляется отметка о записанном исходе.
+    await expect(page.getByLabel("Lab outcome recorded").first()).toBeVisible();
+
+    // Перезаход: открываем прогон из истории — данные сохранились.
+    await page.reload();
+    await page.getByText("Completed", { exact: true }).first().click();
+    await expect(page.getByRole("heading", { name: "Prediction result" })).toBeVisible();
+    await expect(page.getByRole("button", { name: "Update outcome" })).toBeVisible();
+    await expect(page.getByLabel("Lab notes")).toHaveValue("E2E lab outcome");
+
+    // Scorecard видит исход, а страница /models рендерит таблицу.
+    const scorecardResp = await request.get("http://localhost:5126/api/models/scorecard", {
+      headers: authHeader,
+    });
+    const scorecard = await scorecardResp.json();
+    expect(scorecard.some((m: { withOutcome: number }) => m.withOutcome >= 1)).toBeTruthy();
+
+    await page.goto("/models");
+    await expect(page.getByRole("heading", { name: "Model Scorecard" })).toBeVisible();
+    await expect(page.getByTestId("model-scorecard-table")).toBeVisible();
+  });
+
+  test("model scorecard is reachable from the sidebar", async ({ page }) => {
+    await page.goto("/dashboard");
+    await page
+      .getByRole("navigation")
+      .getByRole("link", { name: "Model Scorecard", exact: true })
+      .click();
+    await expect(page).toHaveURL(/\/models$/);
+    await expect(page.getByRole("heading", { name: "Model Scorecard" })).toBeVisible();
+  });
+
+  test("compare versions highlights modified and removed components", async ({ page, request }) => {
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Compare ${marker}`, description: "compare e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Compare Form ${marker}`, targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+    const sodiumChloride = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=sodium%20chloride", {
+        headers: authHeader,
+      })
+    ).json();
+
+    const component = (
+      cid: number,
+      name: string,
+      cas: string | null,
+      formula: string | null,
+      molarMass: number,
+      proportion: number,
+      role: string
+    ) => ({ pubChemCid: cid, chemicalName: name, casNumber: cas, formula, molarMass, proportion, role });
+
+    const conditions = { temperatureCelsius: 25, phTarget: 7, solvent: "water" };
+
+    const v1Resp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            component(aspirin.pubChemCid, aspirin.name, aspirin.casNumber, aspirin.formula, aspirin.molarMass, 0.6, "Active"),
+            component(sodiumChloride.pubChemCid, sodiumChloride.name, sodiumChloride.casNumber, sodiumChloride.formula, sodiumChloride.molarMass, 0.4, "Excipient"),
+          ],
+          conditions,
+        },
+        headers: authHeader,
+      }
+    );
+    expect(v1Resp.ok()).toBeTruthy();
+
+    const v2Resp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          // Аспирин изменён (0.6 → 1.0), хлорид удалён.
+          components: [
+            component(aspirin.pubChemCid, aspirin.name, aspirin.casNumber, aspirin.formula, aspirin.molarMass, 1.0, "Active"),
+          ],
+          conditions,
+        },
+        headers: authHeader,
+      }
+    );
+    expect(v2Resp.ok()).toBeTruthy();
+
+    await page.goto(
+      `/projects/${project.id}/formulations/${formulation.id}?tab=composition`
+    );
+    await expect(page.getByRole("heading", { name: "Compare versions" })).toBeVisible();
+    await page.getByTestId("compare-versions").click();
+
+    const result = page.getByTestId("comparison-result");
+    await expect(result).toBeVisible({ timeout: 10000 });
+
+    const removedRow = result.locator("tr[data-change='Removed']", { hasText: "Sodium chloride" });
+    await expect(removedRow).toBeVisible();
+    await expect(removedRow).toContainText("40.0%");
+
+    const modifiedRow = result.locator("tr[data-change='Modified']", { hasText: "Aspirin" });
+    await expect(modifiedRow).toBeVisible();
+    await expect(modifiedRow).toContainText("60.0%");
+    await expect(modifiedRow).toContainText("100.0%");
+    await expect(modifiedRow).toContainText("40.0 pp");
   });
 
   test("audit trail page lists entries and supports integrity check", async ({ page }) => {

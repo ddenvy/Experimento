@@ -1,3 +1,4 @@
+using FluentValidation;
 using MassTransit;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
@@ -68,6 +69,8 @@ public class GetPredictionResultHandler : IRequestHandler<GetPredictionResultQue
         var result = await _db.PredictionResults
             .Include(r => r.ModelRegistration)
             .Include(r => r.RationaleItems)
+            .Include(r => r.Reviews)
+            .Include(r => r.Outcome)
             .FirstOrDefaultAsync(r => r.JobId == request.JobId, ct)
             ?? throw new NotFoundException($"Result for job {request.JobId} not found.");
         if (!await _auth.OwnsPredictionJobAsync(request.JobId, request.UserId, ct))
@@ -79,9 +82,20 @@ public class GetPredictionResultHandler : IRequestHandler<GetPredictionResultQue
             return new RationaleItemDto(i.Id, i.Category.ToString(), i.Claim, i.Explanation, i.Confidence, sources);
         }).ToList();
 
+        var reviews = result.Reviews
+            .OrderBy(rv => rv.CreatedAtUtc)
+            .Select(rv => new ReviewDto(rv.Id, rv.Decision.ToString(), rv.Comment, rv.CreatedAtUtc))
+            .ToList();
+
+        var outcome = result.Outcome is null
+            ? null
+            : new OutcomeDto(result.Outcome.Id, result.Outcome.ActualSuccess,
+                result.Outcome.ActualMetricsJson, result.Outcome.Notes, result.Outcome.RecordedAtUtc);
+
         return new PredictionResultDto(result.Id, result.JobId, result.ModelRegistrationId,
             result.ModelRegistration.DisplayName, result.SuccessProbability, result.ToxicityScore,
-            result.StabilityScore, result.SideRiskLevel.ToString(), result.Summary, items);
+            result.StabilityScore, result.SideRiskLevel.ToString(), result.Summary, items,
+            reviews, outcome);
     }
 }
 
@@ -122,17 +136,66 @@ public class RecordOutcomeHandler : IRequestHandler<RecordOutcomeCommand, Outcom
         if (!await _auth.OwnsPredictionResultAsync(request.ResultId, request.RecordedBy, ct))
             throw new ForbiddenException();
 
-        var outcome = new ExperimentOutcome
+        // На результат возможен только один исход (unique index IX_ExperimentOutcomes_ResultId),
+        // поэтому повторная запись — это редактирование лабораторного журнала, а не новый ряд.
+        var outcome = await _db.ExperimentOutcomes
+            .FirstOrDefaultAsync(o => o.ResultId == request.ResultId, ct);
+
+        if (outcome is null)
         {
-            ResultId = request.ResultId,
-            ActualSuccess = request.ActualSuccess,
-            ActualMetricsJson = request.ActualMetricsJson,
-            Notes = request.Notes,
-            RecordedBy = request.RecordedBy
-        };
-        _db.ExperimentOutcomes.Add(outcome);
+            outcome = new ExperimentOutcome
+            {
+                ResultId = request.ResultId,
+                RecordedBy = request.RecordedBy
+            };
+            _db.ExperimentOutcomes.Add(outcome);
+        }
+
+        outcome.ActualSuccess = request.ActualSuccess;
+        outcome.ActualMetricsJson = request.ActualMetricsJson;
+        outcome.Notes = request.Notes;
+        outcome.RecordedAtUtc = DateTime.UtcNow;
+
         await _db.SaveChangesAsync(ct);
         return new OutcomeDto(outcome.Id, outcome.ActualSuccess, outcome.ActualMetricsJson, outcome.Notes, outcome.RecordedAtUtc);
+    }
+}
+
+public class SubmitReviewCommandValidator : AbstractValidator<SubmitReviewCommand>
+{
+    public SubmitReviewCommandValidator()
+    {
+        RuleFor(x => x.Decision)
+            .NotEmpty()
+            .Must(d => Enum.TryParse<ReviewDecision>(d, true, out _))
+            .WithMessage("Decision must be one of: Approved, Rejected, NeedsRevision.");
+        RuleFor(x => x.Comment).MaximumLength(1000);
+    }
+}
+
+public class RecordOutcomeCommandValidator : AbstractValidator<RecordOutcomeCommand>
+{
+    public RecordOutcomeCommandValidator()
+    {
+        RuleFor(x => x.ActualMetricsJson)
+            .NotEmpty()
+            .MaximumLength(4000)
+            .Must(BeJsonObject)
+            .WithMessage("ActualMetricsJson must be a valid JSON object.");
+        RuleFor(x => x.Notes).MaximumLength(2000);
+    }
+
+    private static bool BeJsonObject(string json)
+    {
+        try
+        {
+            using var doc = JsonDocument.Parse(json);
+            return doc.RootElement.ValueKind == JsonValueKind.Object;
+        }
+        catch (JsonException)
+        {
+            return false;
+        }
     }
 }
 
@@ -153,7 +216,8 @@ public class GetCalibrationStatsHandler : IRequestHandler<GetCalibrationStatsQue
         }
 
         var total = await scope.CountAsync(ct);
-        var withOutcome = await scope.Where(r => r.Outcome != null).ToListAsync(ct);
+        // Include обязателен: после Where(...) навигация без явного Include не материализуется.
+        var withOutcome = await scope.Where(r => r.Outcome != null).Include(r => r.Outcome).ToListAsync(ct);
 
         var errors = withOutcome.Select(r => Math.Abs(r.SuccessProbability - (r.Outcome!.ActualSuccess ? 1.0 : 0.0))).ToList();
         var biases = withOutcome.Select(r => r.SuccessProbability - (r.Outcome!.ActualSuccess ? 1.0 : 0.0)).ToList();

@@ -9,6 +9,7 @@ import {
   LayoutDashboard,
   FolderKanban,
   BookOpen,
+  Gauge,
   ScrollText,
   Menu,
   LogOut,
@@ -21,6 +22,7 @@ const nav = [
   { href: "/dashboard", label: "Dashboard", icon: LayoutDashboard, exact: true },
   { href: "/projects", label: "Projects", icon: FolderKanban, exact: false },
   { href: "/knowledge", label: "Knowledge Base", icon: BookOpen, exact: false },
+  { href: "/models", label: "Model Scorecard", icon: Gauge, exact: false },
   { href: "/audit", label: "Audit Trail", icon: ScrollText, exact: false },
 ];
 

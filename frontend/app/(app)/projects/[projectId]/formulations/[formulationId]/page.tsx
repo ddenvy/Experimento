@@ -7,6 +7,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent } from "@/components/ui/card";
 import { Breadcrumbs, type Crumb } from "@/components/layout/breadcrumbs";
 import { VersionComposer } from "@/components/formulations/version-composer";
+import { VersionCompare } from "@/components/formulations/version-compare";
 import { PredictionsTab } from "@/components/predictions/predictions-tab";
 import { SimulationsTab } from "@/components/simulations/simulations-tab";
 import { Plus, FlaskConical } from "lucide-react";
@@ -119,6 +120,8 @@ function FormulationDetail() {
 
       {tab === "composition" && (
         <div className="space-y-4">
+          <VersionCompare formulationId={formulationId} versions={versions} />
+
           <div className="flex justify-end">
             <Button onClick={() => setShowComposer((v) => !v)} variant={showComposer ? "outline" : "default"}>
               <Plus className="h-4 w-4" /> New version

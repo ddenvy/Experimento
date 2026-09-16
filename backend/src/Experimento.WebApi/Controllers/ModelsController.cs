@@ -14,4 +14,8 @@ public class ModelsController : BaseController
     [HttpGet]
     public async Task<IActionResult> List()
         => Ok(await Mediator.Send(new ListModelsQuery()));
+
+    [HttpGet("scorecard")]
+    public async Task<IActionResult> Scorecard()
+        => Ok(await Mediator.Send(new GetModelScorecardsQuery(UserId)));
 }

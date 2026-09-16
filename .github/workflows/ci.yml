@@ -1,0 +1,108 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+    branches: [main]
+
+jobs:
+  backend:
+    name: Backend build & tests
+    runs-on: ubuntu-latest
+
+    # ApiFixture ходит в Postgres и RabbitMQ на localhost с кредами experimento/experimento.
+    services:
+      postgres:
+        image: pgvector/pgvector:pg17
+        env:
+          POSTGRES_DB: experimento
+          POSTGRES_USER: experimento
+          POSTGRES_PASSWORD: experimento
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U experimento -d experimento"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 10
+      rabbitmq:
+        image: rabbitmq:3-management
+        env:
+          RABBITMQ_DEFAULT_USER: experimento
+          RABBITMQ_DEFAULT_PASS: experimento
+        ports:
+          - 5672:5672
+        options: >-
+          --health-cmd "rabbitmq-diagnostics -q ping"
+          --health-interval 10s
+          --health-timeout 10s
+          --health-retries 10
+
+    env:
+      ASPNETCORE_ENVIRONMENT: Development
+      Jwt__Key: ci-only-experimento-jwt-signing-key-0123456789abcdef
+      ConnectionStrings__Default: Host=localhost;Port=5432;Database=experimento;Username=experimento;Password=experimento
+      RabbitMq__Host: localhost
+      RabbitMq__Username: experimento
+      RabbitMq__Password: experimento
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup .NET 10
+        uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: '10.0'
+
+      - name: Restore
+        run: dotnet restore
+        working-directory: backend
+
+      - name: Build
+        run: dotnet build --no-restore --configuration Release
+        working-directory: backend
+
+      - name: Run tests (all test projects)
+        # Solution-файла нет, поэтому перечисляем тест-проекты явно.
+        working-directory: backend
+        run: |
+          for proj in tests/*/*.Tests.csproj; do
+            dotnet test "$proj" --no-restore --configuration Release --logger "console;verbosity=minimal"
+          done
+
+  frontend:
+    name: Frontend typecheck, lint & build
+    runs-on: ubuntu-latest
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Typecheck
+        run: npx tsc --noEmit
+        working-directory: frontend
+
+      - name: Lint
+        run: npm run lint
+        working-directory: frontend
+
+      - name: Build
+        run: npm run build
+        working-directory: frontend
+        env:
+          NEXT_PUBLIC_API_URL: http://localhost:5126/api
+
+      # Playwright e2e в CI не запускается: им нужен полный docker-compose стек
+      # (Postgres + RabbitMQ + backend + frontend) и внешние API (PubChem/Gemini).
+      # E2E остаётся локальным гейтом перед мержем.

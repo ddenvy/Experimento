@@ -148,6 +148,21 @@ export interface RationaleItemDto {
   sources: RationaleSourceDto[];
 }
 
+export interface ReviewDto {
+  id: string;
+  decision: string;
+  comment: string | null;
+  createdAtUtc: string;
+}
+
+export interface OutcomeDto {
+  id: string;
+  actualSuccess: boolean;
+  actualMetricsJson: string;
+  notes: string | null;
+  recordedAtUtc: string;
+}
+
 export interface PredictionResultDto {
   id: string;
   jobId: string;
@@ -159,6 +174,8 @@ export interface PredictionResultDto {
   sideRiskLevel: string;
   summary: string;
   rationaleItems: RationaleItemDto[];
+  reviews: ReviewDto[];
+  outcome: OutcomeDto | null;
 }
 
 export interface SimulationCandidateDto {
@@ -239,6 +256,41 @@ export interface CalibrationStatsDto {
   withOutcome: number;
   meanError: number;
   meanBias: number;
+}
+
+export interface ModelRegistrationDto {
+  id: string;
+  name: string;
+  version: string;
+  description: string;
+  contextOfUse: string;
+  registeredAtUtc: string;
+}
+
+export interface ModelScorecardDto {
+  modelId: string;
+  displayName: string;
+  version: string;
+  contextOfUse: string;
+  total: number;
+  withOutcome: number;
+  meanError: number;
+  meanBias: number;
+}
+
+export interface ComponentDiff {
+  chemicalName: string;
+  change: "Added" | "Removed" | "Modified";
+  proportionA: number | null;
+  proportionB: number | null;
+  molarMassA: number | null;
+  molarMassB: number | null;
+}
+
+export interface VersionComparisonDto {
+  versionA: FormulationVersionDto;
+  versionB: FormulationVersionDto;
+  componentDiffs: ComponentDiff[];
 }
 
 export interface RecentRunDto {
@@ -424,6 +476,22 @@ export const api = {
     request<JobDto>(`/predictions/prediction-jobs/${jobId}`),
   getPredictionResult: (jobId: string) =>
     request<PredictionResultDto>(`/predictions/prediction-jobs/${jobId}/result`),
+  submitReview: (
+    resultId: string,
+    data: { decision: string; comment?: string }
+  ) =>
+    request<ReviewDto>(`/predictions/prediction-results/${resultId}/review`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  recordOutcome: (
+    resultId: string,
+    data: { actualSuccess: boolean; actualMetricsJson: string; notes?: string }
+  ) =>
+    request<OutcomeDto>(`/predictions/prediction-results/${resultId}/outcome`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
   getCalibration: () => request<CalibrationStatsDto>("/predictions/calibration"),
 
   // Simulations
@@ -440,7 +508,14 @@ export const api = {
     request<SimulationRunSummaryDto[]>(`/simulations/formulation-versions/${versionId}/simulations`),
 
   // Models
-  listModels: () => request<unknown[]>("/models"),
+  listModels: () => request<ModelRegistrationDto[]>("/models"),
+  getModelScorecard: () => request<ModelScorecardDto[]>("/models/scorecard"),
+
+  // Version comparison
+  compareVersions: (formulationId: string, a: string, b: string) =>
+    request<VersionComparisonDto>(
+      `/formulations/${formulationId}/compare?a=${encodeURIComponent(a)}&b=${encodeURIComponent(b)}`
+    ),
 
   // Knowledge
   listDocuments: (projectId?: string) =>

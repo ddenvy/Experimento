@@ -13,6 +13,7 @@ import { Button } from "@/components/ui/button";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { Brain, Loader2, ArrowRight, CheckCircle2, History } from "lucide-react";
 import { RunStatusBadge } from "@/components/runs/run-status-badge";
+import { OutcomePanel } from "@/components/predictions/outcome-panel";
 
 const sideRiskColor: Record<string, string> = {
   Low: "text-green-600",
@@ -92,6 +93,17 @@ export function PredictionsTab({
     setResult(await api.getPredictionResult(run.jobId));
   }
 
+  // После записи review/outcome перезагружаем результат (reviews/outcome) и историю (флаг HasOutcome).
+  async function reloadActiveResult() {
+    if (!activeJobId) return;
+    const [freshResult, freshRuns] = await Promise.all([
+      api.getPredictionResult(activeJobId),
+      api.listPredictionRuns(versionId),
+    ]);
+    setResult(freshResult);
+    setRuns(freshRuns);
+  }
+
   if (versions.length === 0) {
     return (
       <Card className="border-dashed">
@@ -166,6 +178,11 @@ export function PredictionsTab({
                 ))}
               </div>
             )}
+            <OutcomePanel
+              key={`${result.id}-${result.outcome?.recordedAtUtc ?? "none"}-${result.reviews.length}`}
+              result={result}
+              onChanged={reloadActiveResult}
+            />
             <Button variant="outline" onClick={() => onContinueToSimulation(versionId)}>
               Continue: run simulation <ArrowRight className="h-4 w-4" />
             </Button>

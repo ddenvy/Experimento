@@ -13,7 +13,7 @@ import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
 import { buttonVariants } from "@/components/ui/button";
 import { RunStatusBadge } from "@/components/runs/run-status-badge";
 import { formatDateTime, formatPercent } from "@/lib/format";
-import { FolderKanban, Brain, FlaskConical, BookOpen, ArrowRight, Plus } from "lucide-react";
+import { FolderKanban, Brain, FlaskConical, BookOpen, Gauge, ArrowRight, Plus } from "lucide-react";
 
 export default function DashboardPage() {
   const [projects, setProjects] = useState<ProjectDto[] | null>(null);
@@ -129,6 +129,15 @@ export default function DashboardPage() {
             >
               <span className="flex items-center gap-2">
                 <BookOpen className="h-4 w-4 text-muted-foreground" /> Knowledge Base
+              </span>
+              <ArrowRight className="h-4 w-4 text-muted-foreground" />
+            </Link>
+            <Link
+              href="/models"
+              className="flex items-center justify-between rounded-md border p-3 text-sm hover:bg-muted/40"
+            >
+              <span className="flex items-center gap-2">
+                <Gauge className="h-4 w-4 text-muted-foreground" /> Model Scorecard
               </span>
               <ArrowRight className="h-4 w-4 text-muted-foreground" />
             </Link>
