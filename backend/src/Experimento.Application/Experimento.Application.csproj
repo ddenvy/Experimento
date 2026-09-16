@@ -6,6 +6,7 @@
 
   <ItemGroup>
     <PackageReference Include="FluentValidation" Version="12.1.1" />
+    <!-- Остаёмся на 8.x (MIT): MassTransit 9+ требует платную подписку и лицензионный ключ. -->
     <PackageReference Include="MassTransit" Version="8.2.3" />
     <PackageReference Include="MediatR" Version="14.2.0" />
     <PackageReference Include="Microsoft.EntityFrameworkCore" Version="10.0.12" />

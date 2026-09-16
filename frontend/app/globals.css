@@ -1,6 +1,31 @@
-@tailwind base;
-@tailwind components;
-@tailwind utilities;
+@import "tailwindcss";
+
+/* Тёмная тема переключается классом .dark на корне (бывший darkMode: "class"). */
+@custom-variant dark (&:is(.dark *));
+
+/* Токены shadcn: значения ссылаются на HSL-каналы из :root/.dark ниже.
+   inline — чтобы утилиты использовали переменные по месту, без дублей в :root. */
+@theme inline {
+  --font-sans: var(--font-manrope), system-ui, sans-serif;
+
+  --color-border: hsl(var(--border));
+  --color-input: hsl(var(--input));
+  --color-ring: hsl(var(--ring));
+  --color-background: hsl(var(--background));
+  --color-foreground: hsl(var(--foreground));
+  --color-primary: hsl(var(--primary));
+  --color-primary-foreground: hsl(var(--primary-foreground));
+  --color-muted: hsl(var(--muted));
+  --color-muted-foreground: hsl(var(--muted-foreground));
+  --color-destructive: hsl(var(--destructive));
+  --color-destructive-foreground: hsl(var(--destructive-foreground));
+  --color-card: hsl(var(--card));
+  --color-card-foreground: hsl(var(--card-foreground));
+
+  --radius-lg: var(--radius);
+  --radius-md: calc(var(--radius) - 2px);
+  --radius-sm: calc(var(--radius) - 4px);
+}
 
 @layer base {
   :root {
@@ -36,6 +61,7 @@
     --ring: 210 100% 55%;
   }
 
+  /* В Tailwind 4 дефолтный цвет рамки — currentColor; сохраняем прежнее поведение. */
   * {
     @apply border-border;
   }
