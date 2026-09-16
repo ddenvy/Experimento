@@ -4,7 +4,7 @@ public record UserDto(Guid Id, string Email, string DisplayName, string Role);
 public record AuthTokensDto(string AccessToken, string RefreshToken);
 public record ProjectDto(Guid Id, string Name, string? Description, DateTime CreatedAtUtc);
 public record FormulationDto(Guid Id, Guid ProjectId, string Name, string TargetPurpose, int CurrentVersionNumber);
-public record ComponentDto(Guid Id, string ChemicalName, string? CasNumber, string? Formula, double MolarMass, double Proportion, string? Role);
+public record ComponentDto(Guid Id, string ChemicalName, string? CasNumber, string? Formula, double MolarMass, double Proportion, string? Role, int? PubChemCid);
 public record ConditionsDto(double TemperatureCelsius, double? PressureKPa, double? PhTarget, string? Solvent, string? DeliveryTarget);
 public record FormulationVersionDto(
     Guid Id, Guid FormulationId, int VersionNumber, string Status, string? Notes,

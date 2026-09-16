@@ -4,7 +4,7 @@ using Microsoft.EntityFrameworkCore;
 
 namespace Experimento.Application.Features.Formulations;
 
-public record ComponentInput(string ChemicalName, string? CasNumber, string? Formula, double MolarMass, double Proportion, string? Role);
+public record ComponentInput(string ChemicalName, string? CasNumber, string? Formula, double MolarMass, double Proportion, string? Role, int? PubChemCid = null);
 public record ConditionsInput(double TemperatureCelsius, double? PressureKPa, double? PhTarget, string? Solvent, string? DeliveryTarget);
 
 public record CreateFormulationCommand(Guid ProjectId, string Name, string TargetPurpose, Guid UserId = default) : IRequest<FormulationDto>;
@@ -36,6 +36,9 @@ public class CreateVersionValidator : AbstractValidator<CreateVersionCommand>
             c.RuleFor(x => x.ChemicalName).NotEmpty();
             c.RuleFor(x => x.MolarMass).GreaterThan(0);
             c.RuleFor(x => x.Proportion).InclusiveBetween(0, 1);
+            // Жёсткая привязка к каталогу: вещество должно быть выбрано из PubChem.
+            c.RuleFor(x => x.PubChemCid).NotNull().WithMessage("Component must be selected from the chemical catalog.");
+            c.RuleFor(x => x.PubChemCid).GreaterThan(0).When(x => x.PubChemCid.HasValue);
         });
         RuleFor(x => x.Components)
             .Must(c => Math.Abs(c.Sum(x => x.Proportion) - 1.0) <= 0.001)
@@ -71,7 +74,10 @@ public class CreateVersionHandler : IRequestHandler<CreateVersionCommand, Formul
 {
     private readonly IAppDbContext _db;
     private readonly ResourceAuthorization _auth;
-    public CreateVersionHandler(IAppDbContext db, ResourceAuthorization auth) => (_db, _auth) = (db, auth);
+    private readonly IChemicalCatalogService _catalog;
+
+    public CreateVersionHandler(IAppDbContext db, ResourceAuthorization auth, IChemicalCatalogService catalog)
+        => (_db, _auth, _catalog) = (db, auth, catalog);
 
     public async Task<FormulationVersionDto> Handle(CreateVersionCommand request, CancellationToken ct)
     {
@@ -80,6 +86,18 @@ public class CreateVersionHandler : IRequestHandler<CreateVersionCommand, Formul
 
         var formulation = await _db.Formulations.FindAsync([request.FormulationId], ct)
                           ?? throw new NotFoundException($"Formulation {request.FormulationId} not found.");
+
+        // Серверная верификация: все CID должны существовать в каталоге.
+        // Свойства (имя, формула, масса, CAS) берём ТОЛЬКО из каталога — значениям клиента не доверяем.
+        var cids = request.Components.Select(c => c.PubChemCid!.Value).Distinct().ToList();
+        var catalogEntries = await _catalog.GetByCidsAsync(cids, ct);
+        var byCid = catalogEntries.ToDictionary(e => e.PubChemCid);
+        var unknownCid = cids.FirstOrDefault(cid => !byCid.ContainsKey(cid));
+        if (unknownCid != 0)
+        {
+            throw new BadRequestException(
+                $"Component with PubChem CID {unknownCid} is not present in the chemical catalog. Resolve it via /api/chemicals first.");
+        }
 
         var versionNumber = formulation.NextVersionNumber();
         var version = new FormulationVersion
@@ -99,12 +117,14 @@ public class CreateVersionHandler : IRequestHandler<CreateVersionCommand, Formul
         };
         foreach (var c in request.Components)
         {
+            var entry = byCid[c.PubChemCid!.Value];
             version.Components.Add(new FormulationComponent
             {
-                ChemicalName = c.ChemicalName,
-                CasNumber = c.CasNumber,
-                Formula = c.Formula,
-                MolarMass = c.MolarMass,
+                PubChemCid = entry.PubChemCid,
+                ChemicalName = entry.Name,
+                CasNumber = entry.CasNumber,
+                Formula = entry.Formula,
+                MolarMass = entry.MolarMass,
                 Proportion = c.Proportion,
                 Role = c.Role
             });
@@ -219,7 +239,7 @@ internal static class FormulationMappings
     public static FormulationVersionDto MapVersion(FormulationVersion v)
     {
         var components = v.Components.Select(c => new ComponentDto(c.Id, c.ChemicalName, c.CasNumber,
-            c.Formula, c.MolarMass, c.Proportion, c.Role)).ToList();
+            c.Formula, c.MolarMass, c.Proportion, c.Role, c.PubChemCid)).ToList();
         var conditions = new ConditionsDto(v.Conditions.TemperatureCelsius, v.Conditions.PressureKPa,
             v.Conditions.PhTarget, v.Conditions.Solvent, v.Conditions.DeliveryTarget);
         return new FormulationVersionDto(v.Id, v.FormulationId, v.VersionNumber, v.Status.ToString(),

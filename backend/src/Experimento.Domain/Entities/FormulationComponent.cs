@@ -14,4 +14,10 @@ public class FormulationComponent
     public double MolarMass { get; set; }
     public double Proportion { get; set; }
     public string? Role { get; set; }
+
+    /// <summary>
+    /// PubChem CID выбранного вещества. Обязателен: компонент можно создать
+    /// только из верифицированного каталога; свойства копируются из каталога.
+    /// </summary>
+    public int? PubChemCid { get; set; }
 }

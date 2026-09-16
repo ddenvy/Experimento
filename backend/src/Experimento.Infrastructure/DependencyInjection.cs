@@ -1,3 +1,4 @@
+using Experimento.Infrastructure.Chemicals;
 using Experimento.Infrastructure.Data;
 using Experimento.Infrastructure.Knowledge;
 using Experimento.Infrastructure.Predictions;
@@ -36,6 +37,15 @@ public static class DependencyInjection
         // Knowledge
         services.AddScoped<ChunkingService>();
         services.AddScoped<IVectorSearchService, VectorSearchService>();
+
+        // Chemical catalog (PubChem): in-memory cache for suggestions, DB cache for resolved substances.
+        services.AddMemoryCache();
+        services.AddHttpClient("pubchem", client =>
+        {
+            client.BaseAddress = new Uri("https://pubchem.ncbi.nlm.nih.gov");
+            client.Timeout = TimeSpan.FromSeconds(10);
+        });
+        services.AddScoped<IChemicalCatalogService, PubChemCatalogService>();
 
         // MassTransit + RabbitMQ
         var rabbitHost = config["RabbitMq:Host"] ?? "localhost";

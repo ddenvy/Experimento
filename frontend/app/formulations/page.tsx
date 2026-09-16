@@ -1,10 +1,11 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api, type FormulationVersionDto } from "@/lib/api";
+import { api, type ChemicalDto, type FormulationVersionDto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
+import { ChemicalPicker } from "@/components/chemical-picker";
 import { Plus, Trash2, ChevronDown, ChevronRight, FlaskConical } from "lucide-react";
 
 interface Project {
@@ -18,6 +19,13 @@ interface Formulation {
   name: string;
   targetPurpose: string;
   currentVersionNumber: number;
+}
+
+// Черновик строки компонента: вещество выбирается строго из каталога PubChem.
+interface ComponentDraft {
+  chemical: ChemicalDto | null;
+  proportion: number;
+  role: string;
 }
 
 export default function FormulationsPage() {
@@ -37,7 +45,9 @@ export default function FormulationsPage() {
   const [projectDesc, setProjectDesc] = useState("");
   const [formName, setFormName] = useState("");
   const [formPurpose, setFormPurpose] = useState("");
-  const [components, setComponents] = useState([{ chemicalName: "", molarMass: 0, proportion: 0, role: "" }]);
+  const [components, setComponents] = useState<ComponentDraft[]>([
+    { chemical: null, proportion: 0, role: "" },
+  ]);
   const [temperature, setTemperature] = useState(25);
   const [ph, setPh] = useState(7);
   const [solvent, setSolvent] = useState("water");
@@ -102,15 +112,19 @@ export default function FormulationsPage() {
         setError(`Sum of proportions must equal 1.0 (got ${total.toFixed(3)})`);
         return;
       }
-      const validComponents = components.filter((c) => c.chemicalName && c.molarMass > 0);
-      if (validComponents.length === 0) {
-        setError("Add at least one component with a name and molar mass > 0");
+      if (components.some((c) => c.chemical === null)) {
+        setError("Every component must be selected from the chemical catalog (PubChem).");
         return;
       }
       const v = await api.createVersion(showNewVersion, {
-        components: validComponents.map((c) => ({
-          chemicalName: c.chemicalName,
-          molarMass: Number(c.molarMass),
+        components: components.map((c) => ({
+          // Имя/CAS/формула/масса дублируются для наглядности, но сервер всё равно
+          // берёт эталонные значения из каталога по pubChemCid.
+          pubChemCid: c.chemical!.pubChemCid,
+          chemicalName: c.chemical!.name,
+          casNumber: c.chemical!.casNumber,
+          formula: c.chemical!.formula,
+          molarMass: c.chemical!.molarMass,
           proportion: Number(c.proportion),
           role: c.role || undefined,
         })),
@@ -122,7 +136,7 @@ export default function FormulationsPage() {
         notes: versionNotes || undefined,
       });
       setVersions((prev) => ({ ...prev, [showNewVersion]: [...(prev[showNewVersion] || []), v] }));
-      setComponents([{ chemicalName: "", molarMass: 0, proportion: 0, role: "" }]);
+      setComponents([{ chemical: null, proportion: 0, role: "" }]);
       setVersionNotes("");
       setShowNewVersion(null);
     } catch (err) {
@@ -249,34 +263,34 @@ export default function FormulationsPage() {
                         <div className="space-y-2">
                           <label className="text-sm font-medium">Components (proportions must sum to 1.0)</label>
                           {components.map((c, i) => (
-                            <div key={i} className="flex gap-2 items-center">
-                              <Input
-                                placeholder="Chemical name"
-                                value={c.chemicalName}
-                                onChange={(e) => setComponents((prev) => prev.map((x, j) => j === i ? { ...x, chemicalName: e.target.value } : x))}
-                                className="flex-1"
-                              />
-                              <Input
-                                type="number"
-                                placeholder="Molar mass"
-                                value={c.molarMass || ""}
-                                onChange={(e) => setComponents((prev) => prev.map((x, j) => j === i ? { ...x, molarMass: Number(e.target.value) } : x))}
-                                className="w-28"
-                              />
-                              <Input
-                                type="number"
-                                step="0.01"
-                                placeholder="Proportion"
-                                value={c.proportion || ""}
-                                onChange={(e) => setComponents((prev) => prev.map((x, j) => j === i ? { ...x, proportion: Number(e.target.value) } : x))}
-                                className="w-28"
-                              />
-                              <Input
-                                placeholder="Role"
-                                value={c.role}
-                                onChange={(e) => setComponents((prev) => prev.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}
-                                className="w-28"
-                              />
+                            <div key={i} className="flex gap-2 items-start rounded-md border p-2">
+                              <div className="flex-1">
+                                <ChemicalPicker
+                                  value={c.chemical}
+                                  onSelect={(chemical) =>
+                                    setComponents((prev) => prev.map((x, j) => j === i ? { ...x, chemical } : x))
+                                  }
+                                  onClear={() =>
+                                    setComponents((prev) => prev.map((x, j) => j === i ? { ...x, chemical: null } : x))
+                                  }
+                                />
+                                <div className="mt-2 flex gap-2">
+                                  <Input
+                                    type="number"
+                                    step="0.01"
+                                    placeholder="Proportion"
+                                    value={c.proportion || ""}
+                                    onChange={(e) => setComponents((prev) => prev.map((x, j) => j === i ? { ...x, proportion: Number(e.target.value) } : x))}
+                                    className="w-32"
+                                  />
+                                  <Input
+                                    placeholder="Role (optional)"
+                                    value={c.role}
+                                    onChange={(e) => setComponents((prev) => prev.map((x, j) => j === i ? { ...x, role: e.target.value } : x))}
+                                    className="w-44"
+                                  />
+                                </div>
+                              </div>
                               <Button
                                 type="button"
                                 variant="ghost"
@@ -288,7 +302,7 @@ export default function FormulationsPage() {
                               </Button>
                             </div>
                           ))}
-                          <Button type="button" variant="outline" size="sm" onClick={() => setComponents((prev) => [...prev, { chemicalName: "", molarMass: 0, proportion: 0, role: "" }])}>
+                          <Button type="button" variant="outline" size="sm" onClick={() => setComponents((prev) => [...prev, { chemical: null, proportion: 0, role: "" }])}>
                             <Plus className="h-3 w-3" /> Add component
                           </Button>
                         </div>
@@ -308,7 +322,9 @@ export default function FormulationsPage() {
                         </div>
                         <Input placeholder="Notes (optional)" value={versionNotes} onChange={(e) => setVersionNotes(e.target.value)} />
                         <div className="flex gap-2">
-                          <Button type="submit">Create version</Button>
+                          <Button type="submit" disabled={components.some((c) => c.chemical === null)}>
+                            Create version
+                          </Button>
                           <Button type="button" variant="outline" onClick={() => setShowNewVersion(null)}>Cancel</Button>
                         </div>
                       </form>
@@ -326,7 +342,9 @@ export default function FormulationsPage() {
                             <span className="text-xs text-muted-foreground">{v.status}</span>
                           </div>
                           <p className="text-xs text-muted-foreground">
-                            {v.components.map((c) => `${c.chemicalName} (${c.proportion})`).join(", ")}
+                            {v.components.map((c) =>
+                              `${c.chemicalName}${c.formula ? ` ${c.formula}` : ""} (${c.proportion})`
+                            ).join(", ")}
                           </p>
                           <p className="text-xs text-muted-foreground">
                             {v.conditions.temperatureCelsius}°C · pH {v.conditions.phTarget ?? "—"} · {v.conditions.solvent ?? "—"}

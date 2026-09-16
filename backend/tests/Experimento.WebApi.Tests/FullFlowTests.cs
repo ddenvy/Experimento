@@ -13,10 +13,12 @@ namespace Experimento.WebApi.Tests;
 public class FullFlowTests : IClassFixture<ApiFixture>
 {
     private readonly HttpClient _client;
+    private readonly ApiFixture _factory;
     private static readonly JsonSerializerOptions JsonOpts = new() { PropertyNameCaseInsensitive = true };
 
     public FullFlowTests(ApiFixture factory)
     {
+        _factory = factory;
         _client = factory.CreateClient();
     }
 
@@ -58,14 +60,18 @@ public class FullFlowTests : IClassFixture<ApiFixture>
         Assert.NotNull(formulation);
         var formulationId = formulation.Id;
 
-        // --- 5. Create a formulation version with components and conditions ---
+        // --- 5. Create a formulation version with catalog-verified components and conditions ---
         var versionBody = new
         {
             formulationId,
             components = new[]
             {
-                new { chemicalName = "Compound A", molarMass = 180.16, proportion = 0.6, role = "Active" },
-                new { chemicalName = "Compound B", molarMass = 58.44, proportion = 0.4, role = "Excipient" }
+                new { chemicalName = "Aspirin", casNumber = "50-78-2", formula = "C9H8O4",
+                      molarMass = 180.16, proportion = 0.6, role = "Active",
+                      pubChemCid = ApiFixture.AspirinCid },
+                new { chemicalName = "Sodium chloride", casNumber = "7647-14-5", formula = "ClNa",
+                      molarMass = 58.44, proportion = 0.4, role = "Excipient",
+                      pubChemCid = ApiFixture.SodiumChlorideCid }
             },
             conditions = new { temperatureCelsius = 25.0, phTarget = 7.0, solvent = "water" },
             notes = "E2E test version"
@@ -75,6 +81,20 @@ public class FullFlowTests : IClassFixture<ApiFixture>
         var version = await verResp.Content.ReadFromJsonAsync<VersionDto>(JsonOpts);
         Assert.NotNull(version);
         var versionId = version.Id;
+
+        // --- 5b. A component with an unknown PubChem CID must be rejected ---
+        var bogusBody = new
+        {
+            formulationId,
+            components = new[]
+            {
+                new { chemicalName = "Unobtainium", casNumber = (string?)null, formula = (string?)null,
+                      molarMass = 999.0, proportion = 1.0, role = "Active", pubChemCid = 2_000_000_000 }
+            },
+            conditions = new { temperatureCelsius = 25.0 }
+        };
+        var bogusResp = await _client.PostAsJsonAsync($"/api/formulations/{formulationId}/versions", bogusBody);
+        Assert.Equal(System.Net.HttpStatusCode.BadRequest, bogusResp.StatusCode);
 
         // --- 6. Submit a prediction job ---
         var predResp = await _client.PostAsync($"/api/predictions/formulation-versions/{versionId}/predictions", null);
@@ -99,8 +119,17 @@ public class FullFlowTests : IClassFixture<ApiFixture>
         Assert.InRange(result.SuccessProbability, 0.0, 1.0);
         Assert.False(string.IsNullOrEmpty(result.SideRiskLevel));
 
-        // --- 8. Verify audit trail contains entries for the entities we created ---
-        var auditResp = await _client.GetAsync($"/api/audit?entityType=Formulation&entityId={formulationId}");
+        // --- 8. Audit trail is Admin-only: log in as the seeded admin and verify entries ---
+        var adminResp = await _client.PostAsJsonAsync("/api/auth/login",
+            new { email = "apple@apple.com", password = "Test12345!" });
+        Assert.True(adminResp.IsSuccessStatusCode, $"Admin login failed: {adminResp.StatusCode}");
+        var admin = await adminResp.Content.ReadFromJsonAsync<AuthResponse>(JsonOpts);
+        Assert.NotNull(admin);
+        Assert.Equal("Admin", admin.User.Role);
+
+        var auditClient = _factory.CreateClient();
+        auditClient.DefaultRequestHeaders.Authorization = new AuthenticationHeaderValue("Bearer", admin.AccessToken);
+        var auditResp = await auditClient.GetAsync($"/api/audit?entityType=Formulation&entityId={formulationId}");
         Assert.True(auditResp.IsSuccessStatusCode, $"Audit trail failed: {auditResp.StatusCode}");
         var audit = await auditResp.Content.ReadFromJsonAsync<List<AuditEntry>>(JsonOpts);
         Assert.NotNull(audit);

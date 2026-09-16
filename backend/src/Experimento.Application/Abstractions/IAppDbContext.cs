@@ -26,6 +26,7 @@ public interface IAppDbContext
     DbSet<KnowledgeDocument> KnowledgeDocuments { get; }
     DbSet<KnowledgeChunk> KnowledgeChunks { get; }
     DbSet<AuditEntry> AuditEntries { get; }
+    DbSet<ChemicalCatalogEntry> ChemicalCatalog { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

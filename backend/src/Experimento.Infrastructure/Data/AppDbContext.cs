@@ -28,6 +28,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<ChemicalCatalogEntry> ChemicalCatalog => Set<ChemicalCatalogEntry>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -101,6 +102,13 @@ public class AppDbContext : DbContext, IAppDbContext
             b.HasIndex(c => new { c.DocumentId, c.ChunkIndex }).IsUnique());
         modelBuilder.Entity<AuditEntry>(b =>
             b.HasIndex(e => e.ActorUserId));
+
+        // Каталог веществ: CID уникален, поиск по каноническому имени.
+        modelBuilder.Entity<ChemicalCatalogEntry>(b =>
+        {
+            b.HasIndex(e => e.PubChemCid).IsUnique();
+            b.HasIndex(e => e.CanonicalName);
+        });
 
         base.OnModelCreating(modelBuilder);
     }

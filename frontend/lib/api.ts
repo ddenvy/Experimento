@@ -60,9 +60,12 @@ export interface FormulationDto {
 
 export interface ComponentInput {
   chemicalName: string;
+  casNumber?: string | null;
+  formula?: string | null;
   molarMass: number;
   proportion: number;
   role?: string;
+  pubChemCid?: number | null;
 }
 
 export interface ConditionsInput {
@@ -79,6 +82,16 @@ export interface ComponentDto {
   molarMass: number;
   proportion: number;
   role: string | null;
+  pubChemCid: number | null;
+}
+
+// Вещество из каталога PubChem.
+export interface ChemicalDto {
+  pubChemCid: number;
+  name: string;
+  casNumber: string | null;
+  formula: string | null;
+  molarMass: number;
 }
 
 export interface ConditionsDto {
@@ -310,6 +323,12 @@ export const api = {
       setAccessToken(null);
     }
   },
+
+  // Chemicals (PubChem catalog)
+  suggestChemicals: (query: string, limit = 8) =>
+    request<string[]>(`/chemicals/suggest?query=${encodeURIComponent(query)}&limit=${limit}`),
+  resolveChemical: (name: string) =>
+    request<ChemicalDto>(`/chemicals/resolve?name=${encodeURIComponent(name)}`),
 
   // Formulations
   listProjects: () => request<ProjectDto[]>("/projects"),

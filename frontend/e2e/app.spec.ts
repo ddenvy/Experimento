@@ -59,13 +59,19 @@ test.describe("Authenticated workflow", () => {
 
     // --- Expand the formulation and create a version ---
     await page.getByRole("button", { name: "New version" }).click();
-    await page.getByPlaceholder("Chemical name").fill("Aspirin");
-    await page.getByPlaceholder("Molar mass").fill("180.16");
+
+    // Компонент выбирается строго из каталога PubChem: вводим запрос, выбираем "aspirin".
+    const chemicalInput = page.getByPlaceholder("Search chemical…");
+    await chemicalInput.fill("asp");
+    await page.getByRole("button", { name: /^aspirin$/ }).click({ timeout: 20000 });
+    // После резолва появляется плашка с CID и молекулярной массой.
+    await expect(page.getByText(/CID 2244/)).toBeVisible({ timeout: 20000 });
+
     await page.getByPlaceholder("Proportion").fill("1.0");
-    await page.getByPlaceholder("Role").fill("Active");
+    await page.getByPlaceholder("Role (optional)").fill("Active");
     await page.getByRole("button", { name: "Create version" }).click();
     // Version card should appear
-    await expect(page.getByText("v1")).toBeVisible({ timeout: 10000 });
+    await expect(page.getByText("v1")).toBeVisible({ timeout: 15000 });
   });
 
   test("predictions page: cascading dropdowns and run prediction", async ({ page, request }) => {
@@ -79,13 +85,27 @@ test.describe("Authenticated workflow", () => {
       data: { projectId: project.id, name: "Pred Formulation", targetPurpose: "test" },
       headers: authHeader,
     })).json();
-    await request.post(`http://localhost:5126/api/formulations/${formulation.id}/versions`, {
+    // Резолвим вещество в каталоге PubChem, чтобы получить CID для компонента.
+    const aspirin = await (await request.get(
+      "http://localhost:5126/api/chemicals/resolve?name=aspirin",
+      { headers: authHeader },
+    )).json();
+    const versionResp = await request.post(`http://localhost:5126/api/formulations/${formulation.id}/versions`, {
       data: {
-        components: [{ chemicalName: "Aspirin", molarMass: 180.16, proportion: 1.0, role: "Active" }],
+        components: [{
+          pubChemCid: aspirin.pubChemCid,
+          chemicalName: aspirin.name,
+          casNumber: aspirin.casNumber,
+          formula: aspirin.formula,
+          molarMass: aspirin.molarMass,
+          proportion: 1.0,
+          role: "Active",
+        }],
         conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
       },
       headers: authHeader,
     });
+    expect(versionResp.ok()).toBeTruthy();
 
     await page.goto("/predictions");
     await expect(page.getByRole("heading", { name: "Property Predictions" })).toBeVisible();
