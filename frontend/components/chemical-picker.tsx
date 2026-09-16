@@ -36,10 +36,11 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
   const [resolving, setResolving] = useState<string | null>(null);
   const debounceRef = useRef<ReturnType<typeof setTimeout> | null>(null);
 
-  // Автоподсказки с задержкой 300 мс, чтобы не долбить API на каждый символ.
-  useEffect(() => {
+  // Автоподсказки с задержкой 300 мс планируются из обработчика ввода
+  // (реакция на событие, а не на изменение состояния) — без setState в эффекте.
+  function scheduleSuggestions(raw: string) {
     if (debounceRef.current) clearTimeout(debounceRef.current);
-    const q = query.trim();
+    const q = raw.trim();
     if (q.length < 2) {
       setSuggestions([]);
       setStatus("idle");
@@ -58,10 +59,14 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
           setStatus("error");
         });
     }, 300);
+  }
+
+  // Снимаем отложенный запрос при размонтировании.
+  useEffect(() => {
     return () => {
       if (debounceRef.current) clearTimeout(debounceRef.current);
     };
-  }, [query]);
+  }, []);
 
   async function pick(suggestion: ChemicalSuggestion) {
     setResolving(suggestion.name);
@@ -123,6 +128,7 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
           onChange={(e) => {
             setQuery(e.target.value);
             setOpen(true);
+            scheduleSuggestions(e.target.value);
           }}
           onFocus={() => setOpen(true)}
           // Задержка, чтобы клик по пункту списка успел отработать до закрытия.

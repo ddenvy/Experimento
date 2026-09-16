@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useRef, useState, useSyncExternalStore } from "react";
 import { FlaskConical, Brain, BookOpen, Search, Check, FileText } from "lucide-react";
 import { cn } from "@/lib/utils";
 
@@ -17,16 +17,21 @@ const FORMULATION_ROWS = [
 ];
 
 function FormulateScene({ active, reduced }: SceneProps) {
-  const [phase, setPhase] = useState(0);
+  const [phase, setPhase] = useState(reduced ? 3 : 0);
   const query = "C9H8O4";
   const typed = phase >= 1 ? (phase >= 2 ? query.length : 5) : 0;
 
+  // Сброс фазы при активации/деактивации сцены или смене reduced — во время рендера.
+  const sceneKey = `${active}:${reduced}`;
+  const [prevSceneKey, setPrevSceneKey] = useState(sceneKey);
+  if (sceneKey !== prevSceneKey) {
+    setPrevSceneKey(sceneKey);
+    setPhase(reduced ? 3 : 0);
+  }
+
+  // Таймеры анимации — единственный побочный эффект; setState происходит в колбэках.
   useEffect(() => {
-    setPhase(0);
-    if (!active || reduced) {
-      if (reduced) setPhase(3);
-      return;
-    }
+    if (!active || reduced) return;
     const t = [
       setTimeout(() => setPhase(1), 500),
       setTimeout(() => setPhase(2), 1600),
@@ -98,17 +103,21 @@ function FormulateScene({ active, reduced }: SceneProps) {
 /* ------------------------------ Сцена: Predict ------------------------------ */
 
 function PredictScene({ active, reduced }: SceneProps) {
-  const [phase, setPhase] = useState(0);
+  const [phase, setPhase] = useState(reduced ? 3 : 0);
   const R = 52;
   const CIRC = 2 * Math.PI * R;
   const TARGET = 0.82;
 
+  // Сброс фазы при смене активности/reduced — корректировка состояния во время рендера.
+  const sceneKey = `${active}:${reduced}`;
+  const [prevSceneKey, setPrevSceneKey] = useState(sceneKey);
+  if (sceneKey !== prevSceneKey) {
+    setPrevSceneKey(sceneKey);
+    setPhase(reduced ? 3 : 0);
+  }
+
   useEffect(() => {
-    setPhase(0);
-    if (!active || reduced) {
-      if (reduced) setPhase(3);
-      return;
-    }
+    if (!active || reduced) return;
     const t = [
       setTimeout(() => setPhase(1), 900),
       setTimeout(() => setPhase(2), 2400),
@@ -200,16 +209,20 @@ const KB_RESULTS = [
 ];
 
 function KnowledgeScene({ active, reduced }: SceneProps) {
-  const [phase, setPhase] = useState(0);
+  const [phase, setPhase] = useState(reduced ? 2 : 0);
   const query = "which solvent dissolves caffeine best?";
   const typed = phase === 0 ? Math.min(query.length, 24) : query.length;
 
+  // Сброс фазы при смене активности/reduced — корректировка состояния во время рендера.
+  const sceneKey = `${active}:${reduced}`;
+  const [prevSceneKey, setPrevSceneKey] = useState(sceneKey);
+  if (sceneKey !== prevSceneKey) {
+    setPrevSceneKey(sceneKey);
+    setPhase(reduced ? 2 : 0);
+  }
+
   useEffect(() => {
-    setPhase(0);
-    if (!active || reduced) {
-      if (reduced) setPhase(2);
-      return;
-    }
+    if (!active || reduced) return;
     const t = [
       setTimeout(() => setPhase(1), 1500),
       setTimeout(() => setPhase(2), 2800),
@@ -273,20 +286,32 @@ const TABS = [
   { id: "knowledge", label: "Knowledge", icon: BookOpen, Scene: KnowledgeScene },
 ] as const;
 
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
+
+// Подписка на системную настройку reduced motion без setState в эффекте.
+function subscribeReducedMotion(callback: () => void) {
+  const mq = window.matchMedia(REDUCED_MOTION_QUERY);
+  mq.addEventListener("change", callback);
+  return () => mq.removeEventListener("change", callback);
+}
+
 export function HeroDemo() {
   const [tab, setTab] = useState(0);
-  const [reduced, setReduced] = useState(false);
+  const reduced = useSyncExternalStore(
+    subscribeReducedMotion,
+    () => window.matchMedia(REDUCED_MOTION_QUERY).matches,
+    () => false
+  );
   const timer = useRef<ReturnType<typeof setInterval> | null>(null);
 
+  // Автопрокрутка вкладок; setState выполняется только в колбэке интервала.
   useEffect(() => {
-    const mq = window.matchMedia("(prefers-reduced-motion: reduce)");
-    setReduced(mq.matches);
-    if (mq.matches) return;
+    if (reduced) return;
     timer.current = setInterval(() => setTab((t) => (t + 1) % TABS.length), TAB_DURATION);
     return () => {
       if (timer.current) clearInterval(timer.current);
     };
-  }, []);
+  }, [reduced]);
 
   function pick(i: number) {
     setTab(i);

@@ -104,8 +104,13 @@ export function AppShell({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const [drawerOpen, setDrawerOpen] = useState(false);
 
-  // Меню закрывается при каждой смене маршрута.
-  useEffect(() => setDrawerOpen(false), [pathname]);
+  // Меню закрывается при каждой смене маршрута: корректировка состояния
+  // во время рендера вместо эффекта (React повторно рендерит до коммита).
+  const [prevPathname, setPrevPathname] = useState(pathname);
+  if (pathname !== prevPathname) {
+    setPrevPathname(pathname);
+    setDrawerOpen(false);
+  }
 
   return (
     <div className="flex min-h-screen">

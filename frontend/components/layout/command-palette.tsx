@@ -48,28 +48,50 @@ export function CommandPalette() {
     };
   }, []);
 
-  // Данные сущностей подтягиваем при первом открытии.
+  // Данные сущностей подтягиваем при первом открытии (setState — только после await).
   useEffect(() => {
     if (!open || loaded) return;
+    let cancelled = false;
     void (async () => {
       const ps = await api.listProjects().catch(() => []);
+      if (cancelled) return;
       setProjects(ps);
       const fs = (
         await Promise.all(
           ps.map((p) => api.listFormulations(p.id).catch(() => [] as FormulationDto[]))
         )
       ).flat();
+      if (cancelled) return;
       setFormulations(fs);
       setLoaded(true);
     })();
+    return () => {
+      cancelled = true;
+    };
   }, [open, loaded]);
 
-  useEffect(() => {
+  // Сброс поиска/выбора при открытии палитры — корректировка состояния во время рендера.
+  const [prevOpen, setPrevOpen] = useState(open);
+  if (open !== prevOpen) {
+    setPrevOpen(open);
     if (open) {
       setQuery("");
       setActive(0);
-      setTimeout(() => inputRef.current?.focus(), 0);
     }
+  }
+
+  // Сброс активной строки при изменении запроса — тоже во время рендера.
+  const [prevQuery, setPrevQuery] = useState(query);
+  if (query !== prevQuery) {
+    setPrevQuery(query);
+    setActive(0);
+  }
+
+  // Фокус поля — побочный эффект на DOM, без setState в теле эффекта.
+  useEffect(() => {
+    if (!open) return;
+    const t = setTimeout(() => inputRef.current?.focus(), 0);
+    return () => clearTimeout(t);
   }, [open]);
 
   const entries = useMemo<PaletteEntry[]>(() => {
@@ -100,8 +122,6 @@ export function CommandPalette() {
     },
     [router]
   );
-
-  useEffect(() => setActive(0), [query]);
 
   if (!open) return null;
 

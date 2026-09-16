@@ -1,6 +1,6 @@
 "use client";
 
-import { useCallback, useEffect, useState } from "react";
+import { useEffect, useState } from "react";
 import Link from "next/link";
 import { useParams } from "next/navigation";
 import { api, type ProjectDto, type FormulationDto } from "@/lib/api";
@@ -20,24 +20,28 @@ export default function ProjectDetailPage() {
   const [error, setError] = useState<string | null>(null);
   const [showDialog, setShowDialog] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [p, fs] = await Promise.all([
-        api.getProject(projectId),
-        api.listFormulations(projectId),
-      ]);
-      setProject(p);
-      setFormulations(fs);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load project");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId]);
-
+  // Все setState — только после await; флаг отмены защищает от гонки при смене маршрута.
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, fs] = await Promise.all([
+          api.getProject(projectId),
+          api.listFormulations(projectId),
+        ]);
+        if (cancelled) return;
+        setProject(p);
+        setFormulations(fs);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load project");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId]);
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
   if (error || !project) {

@@ -1,6 +1,6 @@
 "use client";
 
-import { useEffect, useRef, useState } from "react";
+import { useRef, useState } from "react";
 import ReactMarkdown from "react-markdown";
 import remarkGfm from "remark-gfm";
 import { api, type FormulationVersionDto } from "@/lib/api";
@@ -70,10 +70,15 @@ export function ReportTab({
   const [error, setError] = useState<string | null>(null);
   const contentRef = useRef<HTMLDivElement>(null);
 
-  // Реагируем на внешнюю передачу версии (?version= / кнопки потока).
-  useEffect(() => {
-    if (initialVersionId) setVersionId(initialVersionId);
-  }, [initialVersionId]);
+  // Реагируем на внешнюю передачу версии (?version= / кнопки потока):
+  // корректировка состояния во время рендера, без эффекта.
+  const [prevInitialVersionId, setPrevInitialVersionId] = useState(initialVersionId);
+  if (initialVersionId && initialVersionId !== prevInitialVersionId) {
+    setPrevInitialVersionId(initialVersionId);
+    setVersionId(initialVersionId);
+    setMarkdown(null);
+    setError(null);
+  }
 
   function handleVersionChange(next: string) {
     setVersionId(next);

@@ -42,19 +42,37 @@ export function SimulationsTab({
 
   useEffect(() => () => trackRef.current?.cancel(), []);
 
-  useEffect(() => {
-    if (initialVersionId) setVersionId(initialVersionId);
-  }, [initialVersionId]);
+  // Внешняя передача версии (?version= / кнопки потока): корректировка во время рендера.
+  const [prevInitialVersionId, setPrevInitialVersionId] = useState(initialVersionId);
+  if (initialVersionId && initialVersionId !== prevInitialVersionId) {
+    setPrevInitialVersionId(initialVersionId);
+    setVersionId(initialVersionId);
+  }
 
-  useEffect(() => {
+  // Сброс результата и истории при смене версии — во время рендера, без эффекта.
+  const [runsVersionId, setRunsVersionId] = useState(versionId);
+  if (versionId !== runsVersionId) {
+    setRunsVersionId(versionId);
     setResult(null);
     setActiveJobId(null);
     setError(null);
-    if (!versionId) {
-      setRuns([]);
-      return;
-    }
-    api.listSimulationRuns(versionId).then(setRuns).catch(() => setRuns([]));
+    setRuns([]);
+  }
+
+  useEffect(() => {
+    if (!versionId) return;
+    let cancelled = false;
+    api
+      .listSimulationRuns(versionId)
+      .then((r) => {
+        if (!cancelled) setRuns(r);
+      })
+      .catch(() => {
+        if (!cancelled) setRuns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [versionId]);
 
   async function runSimulation() {

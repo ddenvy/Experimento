@@ -1,11 +1,14 @@
 "use client";
 
-import { useEffect, useLayoutEffect, useRef, useState } from "react";
+import { useEffect, useLayoutEffect, useRef } from "react";
 import { cn } from "@/lib/utils";
+
+const REDUCED_MOTION_QUERY = "(prefers-reduced-motion: reduce)";
 
 /**
  * Появление блока при скролле. Fail-open: без JS (или при reduced-motion)
- * контент виден сразу — класс скрытия выставляется только в клиенте до первой отрисовки.
+ * контент виден сразу — класс скрытия выставляется императивно в DOM
+ * в layout-эффекте до первой отрисовки, без React-состояния.
  */
 export function Reveal({
   children,
@@ -19,22 +22,25 @@ export function Reveal({
   as?: "div" | "section" | "li" | "span";
 }) {
   const ref = useRef<HTMLElement | null>(null);
-  const [armed, setArmed] = useState(false);
-  const [visible, setVisible] = useState(false);
 
+  // Класс скрытия и задержку ставим до отрисовки, чтобы не было вспышки контента.
   useLayoutEffect(() => {
-    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
-    setArmed(true);
-  }, []);
-
-  useEffect(() => {
-    if (!armed) return;
     const el = ref.current;
     if (!el) return;
+    if (window.matchMedia(REDUCED_MOTION_QUERY).matches) return;
+    el.classList.add("lp-reveal");
+    el.style.transitionDelay = `${delay}ms`;
+  }, [delay]);
+
+  // Появление по вхождению во вьюпорт — класс переключаем прямо на элементе.
+  useEffect(() => {
+    const el = ref.current;
+    if (!el) return;
+    if (window.matchMedia(REDUCED_MOTION_QUERY).matches) return;
     const observer = new IntersectionObserver(
       (entries) => {
         if (entries.some((e) => e.isIntersecting)) {
-          setVisible(true);
+          el.classList.add("lp-visible");
           observer.disconnect();
         }
       },
@@ -42,14 +48,13 @@ export function Reveal({
     );
     observer.observe(el);
     return () => observer.disconnect();
-  }, [armed]);
+  }, []);
 
   return (
     <Tag
       // @ts-expect-error — общий ref для допустимых тегов
       ref={ref}
-      className={cn("min-w-0", armed && "lp-reveal", visible && "lp-visible", className)}
-      style={armed && !visible ? { transitionDelay: `${delay}ms` } : undefined}
+      className={cn("min-w-0", className)}
     >
       {children}
     </Tag>

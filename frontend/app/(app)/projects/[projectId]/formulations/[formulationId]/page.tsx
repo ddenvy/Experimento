@@ -1,6 +1,6 @@
 "use client";
 
-import { Suspense, useCallback, useEffect, useState } from "react";
+import { Suspense, useEffect, useState } from "react";
 import { useParams, useRouter, useSearchParams } from "next/navigation";
 import { api, type ProjectDto, type FormulationDto, type FormulationVersionDto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
@@ -39,29 +39,33 @@ function FormulationDetail() {
   const [error, setError] = useState<string | null>(null);
   const [showComposer, setShowComposer] = useState(false);
 
-  const load = useCallback(async () => {
-    try {
-      const [p, f, vs] = await Promise.all([
-        api.getProject(projectId),
-        api
-          .listFormulations(projectId)
-          .then((fs) => fs.find((x) => x.id === formulationId) ?? null),
-        api.listVersions(formulationId),
-      ]);
-      if (!f) throw new Error("Formulation not found.");
-      setProject(p);
-      setFormulation(f);
-      setVersions(vs);
-    } catch (e) {
-      setError(e instanceof Error ? e.message : "Failed to load formulation");
-    } finally {
-      setLoading(false);
-    }
-  }, [projectId, formulationId]);
-
+  // Загрузка сущностей — подписка на внешнюю систему (API): все setState
+  // выполняются только после await, флаг отмены защищает от гонки при смене маршрута.
   useEffect(() => {
-    void load();
-  }, [load]);
+    let cancelled = false;
+    (async () => {
+      try {
+        const [p, fs, vs] = await Promise.all([
+          api.getProject(projectId),
+          api.listFormulations(projectId),
+          api.listVersions(formulationId),
+        ]);
+        if (cancelled) return;
+        const f = fs.find((x) => x.id === formulationId) ?? null;
+        if (!f) throw new Error("Formulation not found.");
+        setProject(p);
+        setFormulation(f);
+        setVersions(vs);
+      } catch (e) {
+        if (!cancelled) setError(e instanceof Error ? e.message : "Failed to load formulation");
+      } finally {
+        if (!cancelled) setLoading(false);
+      }
+    })();
+    return () => {
+      cancelled = true;
+    };
+  }, [projectId, formulationId]);
 
   function setTab(next: TabId) {
     const qs = new URLSearchParams(searchParams.toString());

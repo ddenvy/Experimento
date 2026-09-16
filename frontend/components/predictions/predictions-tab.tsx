@@ -43,20 +43,39 @@ export function PredictionsTab({
 
   useEffect(() => () => trackRef.current?.cancel(), []);
 
-  // Реагируем на внешнюю передачу версии (кнопки потока на странице формуляции).
-  useEffect(() => {
-    if (initialVersionId) setVersionId(initialVersionId);
-  }, [initialVersionId]);
+  // Реагируем на внешнюю передачу версии (кнопки потока на странице формуляции):
+  // сброс состояния во время рендера при изменении пропа, без эффекта.
+  const [prevInitialVersionId, setPrevInitialVersionId] = useState(initialVersionId);
+  if (initialVersionId && initialVersionId !== prevInitialVersionId) {
+    setPrevInitialVersionId(initialVersionId);
+    setVersionId(initialVersionId);
+  }
 
-  useEffect(() => {
+  // Сброс выбранного результата при смене версии — тоже корректировка состояния
+  // во время рендера (React повторно отрендерит до коммита, без каскадного эффекта).
+  const [runsVersionId, setRunsVersionId] = useState(versionId);
+  if (versionId !== runsVersionId) {
+    setRunsVersionId(versionId);
     setResult(null);
     setActiveJobId(null);
     setError(null);
-    if (!versionId) {
-      setRuns([]);
-      return;
-    }
-    api.listPredictionRuns(versionId).then(setRuns).catch(() => setRuns([]));
+    setRuns([]);
+  }
+
+  useEffect(() => {
+    if (!versionId) return;
+    let cancelled = false;
+    api
+      .listPredictionRuns(versionId)
+      .then((r) => {
+        if (!cancelled) setRuns(r);
+      })
+      .catch(() => {
+        if (!cancelled) setRuns([]);
+      });
+    return () => {
+      cancelled = true;
+    };
   }, [versionId]);
 
   async function runPrediction() {
