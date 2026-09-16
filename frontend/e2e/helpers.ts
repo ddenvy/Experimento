@@ -1,32 +1,51 @@
 import { Page, APIRequestContext } from "@playwright/test";
 
 /**
- * Test credentials for the seeded test user.
+ * Test credentials for the seeded test admin user.
  */
 export const TEST_USER = {
   email: "apple@apple.com",
   password: "Test12345!",
 };
 
+export interface AuthState {
+  token: string;
+  cookies: Array<{
+    name: string;
+    value: string;
+    domain?: string;
+    path: string;
+    expires: number;
+    httpOnly: boolean;
+    secure: boolean;
+    sameSite: "Strict" | "Lax" | "None";
+  }>;
+}
+
 /**
- * Logs in via the backend API and returns the access token.
- * The backend must be reachable at http://localhost:5126.
+ * Логинится через API бэкенда и возвращает access-токен вместе с cookie
+ * (refresh-токен лежит в httpOnly-cookie).
+ * Бэкенд должен быть доступен на http://localhost:5126.
  */
-export async function loginApi(request: APIRequestContext): Promise<string> {
+export async function loginApi(request: APIRequestContext): Promise<AuthState> {
   const resp = await request.post("http://localhost:5126/api/auth/login", {
     data: { email: TEST_USER.email, password: TEST_USER.password },
   });
   if (!resp.ok()) throw new Error(`Login failed: ${resp.status()}`);
   const body = await resp.json();
-  return body.accessToken as string;
+
+  const storage = await request.storageState();
+  return {
+    token: body.accessToken as string,
+    cookies: storage.cookies as AuthState["cookies"],
+  };
 }
 
 /**
- * Injects the access token into localStorage BEFORE the page loads,
- * so the AuthGuard sees an authenticated state on first render.
+ * Инъецирует refresh-cookie в браузерный контекст ДО загрузки страницы,
+ * чтобы AuthGuard восстановил сессию через /auth/refresh при первом рендере.
+ * Access-токен в приложении живёт в памяти и не может быть подставлен извне.
  */
-export async function injectAuth(page: Page, token: string): Promise<void> {
-  await page.addInitScript((t) => {
-    localStorage.setItem("access_token", t);
-  }, token);
+export async function injectAuth(page: Page, cookies: AuthState["cookies"]): Promise<void> {
+  await page.context().addCookies(cookies);
 }

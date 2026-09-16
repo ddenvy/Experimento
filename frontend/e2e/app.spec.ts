@@ -8,13 +8,16 @@ import { injectAuth, loginApi } from "./helpers";
  */
 test.describe("Authenticated workflow", () => {
   let token: string;
+  let cookies: Awaited<ReturnType<typeof loginApi>>["cookies"];
 
   test.beforeAll(async ({ request }) => {
-    token = await loginApi(request);
+    const auth = await loginApi(request);
+    token = auth.token;
+    cookies = auth.cookies;
   });
 
   test.beforeEach(async ({ page }) => {
-    await injectAuth(page, token);
+    await injectAuth(page, cookies);
   });
 
   test("dashboard shows stat cards", async ({ page }) => {

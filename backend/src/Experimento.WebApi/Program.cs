@@ -143,7 +143,7 @@ builder.Services.AddRateLimiter(options =>
                 _ => new FixedWindowRateLimiterOptions
                 {
                     Window = TimeSpan.FromMinutes(1),
-                    PermitLimit = 10,
+                    PermitLimit = 20,
                     QueueLimit = 0
                 })
             : RateLimitPartition.GetTokenBucketLimiter(
@@ -170,7 +170,9 @@ using (var scope = app.Services.CreateScope())
 {
     var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
     await db.Database.MigrateAsync();
-    await DbSeeder.SeedAsync(db);
+    // В Development тестовый админ создаётся всегда; в Production — только по флагу Seed:TestAdmin.
+    var seedTestAdmin = app.Environment.IsDevelopment() || config.GetValue<bool>("Seed:TestAdmin");
+    await DbSeeder.SeedAsync(db, seedTestAdmin);
 }
 
 // Pipeline

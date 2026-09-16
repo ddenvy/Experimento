@@ -71,6 +71,24 @@ export interface ConditionsInput {
   solvent?: string;
 }
 
+export interface ComponentDto {
+  id: string;
+  chemicalName: string;
+  casNumber: string | null;
+  formula: string | null;
+  molarMass: number;
+  proportion: number;
+  role: string | null;
+}
+
+export interface ConditionsDto {
+  temperatureCelsius: number;
+  pressureKPa: number | null;
+  phTarget: number | null;
+  solvent: string | null;
+  deliveryTarget: string | null;
+}
+
 export interface FormulationVersionDto {
   id: string;
   formulationId: string;
@@ -78,6 +96,8 @@ export interface FormulationVersionDto {
   status: string;
   notes: string | null;
   createdAtUtc: string;
+  components: ComponentDto[];
+  conditions: ConditionsDto;
 }
 
 export interface JobDto {

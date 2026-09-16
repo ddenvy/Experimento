@@ -26,9 +26,9 @@ test.describe("Authentication", () => {
     await expect(page).toHaveURL(/\/$/, { timeout: 10_000 });
     await expect(page.getByRole("heading", { name: "Dashboard" })).toBeVisible();
 
-    // Token should be stored
-    const token = await page.evaluate(() => localStorage.getItem("access_token"));
-    expect(token).toBeTruthy();
+    // Refresh-токен должен лежать в httpOnly-cookie (access-токен — только в памяти).
+    const cookies = await page.context().cookies("http://localhost:5126");
+    expect(cookies.some((c) => c.name === "experimento_refresh" && c.httpOnly)).toBeTruthy();
   });
 
   test("invalid credentials show an error message", async ({ page }) => {

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useState } from "react";
-import { api } from "@/lib/api";
+import { api, type FormulationVersionDto } from "@/lib/api";
 import { Button } from "@/components/ui/button";
 import { Input } from "@/components/ui/input";
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card";
@@ -20,22 +20,12 @@ interface Formulation {
   currentVersionNumber: number;
 }
 
-interface Version {
-  id: string;
-  versionNumber: number;
-  status: string;
-  notes: string | null;
-  createdAtUtc: string;
-  components: { chemicalName: string; molarMass: number; proportion: number; role: string | null }[];
-  conditions: { temperatureCelsius: number; phTarget: number | null; solvent: string | null };
-}
-
 export default function FormulationsPage() {
   const [projects, setProjects] = useState<Project[]>([]);
   const [selectedProject, setSelectedProject] = useState<string | null>(null);
   const [formulations, setFormulations] = useState<Formulation[]>([]);
   const [expandedFormulation, setExpandedFormulation] = useState<string | null>(null);
-  const [versions, setVersions] = useState<Record<string, Version[]>>({});
+  const [versions, setVersions] = useState<Record<string, FormulationVersionDto[]>>({});
 
   // modals
   const [showNewProject, setShowNewProject] = useState(false);
