@@ -53,6 +53,9 @@ if (string.IsNullOrWhiteSpace(jwtKey))
     if (builder.Environment.IsDevelopment())
     {
         jwtKey = "experimento-development-only-key-do-not-use-in-production-0123456789";
+        // Пишем фолбэк обратно в конфигурацию, чтобы AuthService (IConfiguration["Jwt:Key"])
+        // и JWT Bearer использовали один и тот же ключ.
+        config["Jwt:Key"] = jwtKey;
     }
     else
     {

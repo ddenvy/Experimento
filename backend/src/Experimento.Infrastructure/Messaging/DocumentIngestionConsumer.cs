@@ -1,5 +1,4 @@
 using MassTransit;
-using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Experimento.Infrastructure.Data;
 using Experimento.Infrastructure.Knowledge;
@@ -36,21 +35,15 @@ public class DocumentIngestionConsumer : IConsumer<IngestDocumentCommand>
             doc.Status = "Processing";
             await _db.SaveChangesAsync();
 
-            // Сырой контент при загрузке сохраняется как чанк с индексом 0.
-            var rawChunk = await _db.KnowledgeChunks
-                .FirstOrDefaultAsync(c => c.DocumentId == docId && c.ChunkIndex == 0);
-            if (rawChunk is null)
+            var content = context.Message.Content;
+            if (string.IsNullOrWhiteSpace(content))
             {
                 doc.Status = "Failed";
                 await _db.SaveChangesAsync();
                 return;
             }
 
-            var content = rawChunk.Content;
             var chunks = _chunking.Chunk(content);
-
-            // Удаляем временный сырой чанк.
-            _db.KnowledgeChunks.Remove(rawChunk);
 
             // Эмбеддинги строятся одним пакетом — один сетевой вызов вместо N.
             var vectors = await _embedding.EmbedBatchAsync(chunks, context.CancellationToken);

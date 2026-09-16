@@ -12,5 +12,7 @@ public record SubmitSimulationCommand(Guid JobId);
 
 /// <summary>
 /// Command to ingest (chunk + embed) a knowledge document.
+/// Контент передаётся прямо в сообщении: таблица KnowledgeChunks содержит только
+/// финальные чанки с векторами (колонка vector(1536) NOT NULL).
 /// </summary>
-public record IngestDocumentCommand(Guid DocumentId);
+public record IngestDocumentCommand(Guid DocumentId, string Content);

@@ -1,7 +1,7 @@
 "use client";
 
 import { useEffect, useRef, useState } from "react";
-import { api, type ChemicalDto } from "@/lib/api";
+import { api, type ChemicalDto, type ChemicalSuggestion } from "@/lib/api";
 import { Input } from "@/components/ui/input";
 import { Loader2, CheckCircle2, X, Search } from "lucide-react";
 
@@ -14,14 +14,23 @@ interface ChemicalPickerProps {
 
 type SuggestStatus = "idle" | "loading" | "ready" | "error";
 
+// Подпись типа совпадения для бейджа в списке кандидатов.
+const MATCH_LABEL: Record<ChemicalSuggestion["matchType"], string> = {
+  local: "Catalog",
+  name: "Name",
+  formula: "Formula",
+  cas: "CAS",
+};
+
 /**
  * Поле выбора вещества из каталога PubChem.
- * Свободный ввод невозможен: вещество нужно выбрать из подсказок,
- * после чего CID/формула/молекулярная масса подставляются с сервера.
+ * Одно поле понимает название/синоним, CAS-номер (50-78-2) и молекулярную
+ * формулу (C9H8O4) — по формуле возвращаются изомеры, пользователь выбирает
+ * конкретное вещество. Свободный ввод недоступен: CID/формула/масса приходят с сервера.
  */
-export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search chemical…" }: ChemicalPickerProps) {
+export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search by name, formula or CAS…" }: ChemicalPickerProps) {
   const [query, setQuery] = useState("");
-  const [suggestions, setSuggestions] = useState<string[]>([]);
+  const [suggestions, setSuggestions] = useState<ChemicalSuggestion[]>([]);
   const [open, setOpen] = useState(false);
   const [status, setStatus] = useState<SuggestStatus>("idle");
   const [resolving, setResolving] = useState<string | null>(null);
@@ -40,9 +49,9 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
     debounceRef.current = setTimeout(() => {
       api
         .suggestChemicals(q)
-        .then((names) => {
-          setSuggestions(names);
-          setStatus(names.length > 0 ? "ready" : "error");
+        .then((items) => {
+          setSuggestions(items);
+          setStatus(items.length > 0 ? "ready" : "error");
         })
         .catch(() => {
           setSuggestions([]);
@@ -54,10 +63,14 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
     };
   }, [query]);
 
-  async function pick(name: string) {
-    setResolving(name);
+  async function pick(suggestion: ChemicalSuggestion) {
+    setResolving(suggestion.name);
     try {
-      const chemical = await api.resolveChemical(name);
+      // Кандидаты с CID (формула/CAS/локальный каталог) резолвятся детерминированно,
+      // варианты названий — по имени (PUG сам выберет каноническую запись).
+      const chemical = suggestion.pubChemCid !== null
+        ? await api.resolveChemicalByCid(suggestion.pubChemCid)
+        : await api.resolveChemical(suggestion.name);
       onSelect(chemical);
       setOpen(false);
     } catch {
@@ -118,25 +131,35 @@ export function ChemicalPicker({ value, onSelect, onClear, placeholder = "Search
       </div>
 
       {open && query.trim().length >= 2 && (
-        <div className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-y-auto">
+        <div role="listbox" className="absolute z-20 mt-1 w-full rounded-md border bg-popover shadow-md max-h-60 overflow-y-auto">
           {status === "loading" && (
             <div className="flex items-center gap-2 px-3 py-2 text-sm text-muted-foreground">
               <Loader2 className="h-3.5 w-3.5 animate-spin" /> Searching…
             </div>
           )}
           {status === "error" && suggestions.length === 0 && resolving === null && (
-            <div className="px-3 py-2 text-sm text-muted-foreground">No substances found</div>
+            <div className="px-3 py-2 text-sm text-muted-foreground">
+              No substances found — try a name, formula (C9H8O4) or CAS (50-78-2)
+            </div>
           )}
-          {suggestions.map((name) => (
+          {suggestions.map((s) => (
             <button
-              key={name}
+              key={`${s.matchType}-${s.pubChemCid ?? s.name}`}
               type="button"
+              role="option"
+              aria-selected={false}
               onMouseDown={(e) => e.preventDefault()}
-              onClick={() => void pick(name)}
-              className="flex w-full items-center justify-between px-3 py-2 text-left text-sm hover:bg-accent"
+              onClick={() => void pick(s)}
+              className="flex w-full items-center justify-between gap-2 px-3 py-2 text-left text-sm hover:bg-accent"
             >
-              <span className="truncate">{name}</span>
-              {resolving === name && <Loader2 className="h-3.5 w-3.5 animate-spin shrink-0" />}
+              <span className="truncate">{s.name}</span>
+              <span className="flex items-center gap-1.5 shrink-0 text-xs text-muted-foreground">
+                {s.formula && <span className="font-mono">{s.formula}</span>}
+                <span className="rounded border px-1 py-0.5 text-[10px] uppercase tracking-wide">
+                  {MATCH_LABEL[s.matchType]}
+                </span>
+                {resolving === s.name && <Loader2 className="h-3.5 w-3.5 animate-spin" />}
+              </span>
             </button>
           ))}
         </div>

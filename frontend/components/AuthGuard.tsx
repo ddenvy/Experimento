@@ -4,8 +4,6 @@ import { usePathname, useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { refreshAccessToken } from "@/lib/api";
 
-const PUBLIC_PATHS = ["/login"];
-
 export function AuthGuard({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
@@ -16,10 +14,6 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     let cancelled = false;
 
     async function bootstrap(): Promise<void> {
-      if (PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
-        setReady(true);
-        return;
-      }
       // Access-токен живёт в памяти и теряется при перезагрузке — восстанавливаем сессию
       // через refresh-токен в httpOnly-cookie.
       const authenticated = await refreshAccessToken();
@@ -37,9 +31,9 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     };
   }, [pathname, router]);
 
-  if (!ready && !PUBLIC_PATHS.some((p) => pathname.startsWith(p))) {
+  if (!ready) {
     return (
-      <div className="flex items-center justify-center min-h-[60vh] text-sm text-muted-foreground">
+      <div className="flex items-center justify-center min-h-screen text-sm text-muted-foreground">
         Loading…
       </div>
     );

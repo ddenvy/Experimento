@@ -17,20 +17,24 @@ public class ChemicalsController : ControllerBase
 
     public ChemicalsController(IChemicalCatalogService catalog) => _catalog = catalog;
 
-    /// <summary>Автоподсказки названий веществ (для выпадающего списка в UI).</summary>
+    /// <summary>
+    /// Автоподсказки для одного поля поиска: название/синоним, CAS-номер
+    /// (50-78-2) или молекулярная формула (C9H8O4, H2O). Для формулы возвращается
+    /// список изомеров с CID — конкретное вещество выбирает пользователь.
+    /// </summary>
     [HttpGet("suggest")]
     public async Task<IActionResult> Suggest([FromQuery] string? query, [FromQuery] int limit = 8,
         CancellationToken cancellationToken = default)
     {
         if (string.IsNullOrWhiteSpace(query) || query.Trim().Length < 2)
             throw new BadRequestException("Query must be at least 2 characters.");
-        var names = await _catalog.SuggestNamesAsync(query, limit, cancellationToken);
-        return Ok(names);
+        var suggestions = await _catalog.SuggestAsync(query, limit, cancellationToken);
+        return Ok(suggestions);
     }
 
     /// <summary>
     /// Резолвит вещество по названию: возвращает CID, формулу, молекулярную массу и CAS
-    /// и кэширует результат. Вызывается при выборе вещества из списка подсказок.
+    /// и кэширует результат. Вызывается при выборе варианта автодополнения по названию.
     /// </summary>
     [HttpGet("resolve")]
     public async Task<IActionResult> Resolve([FromQuery] string? name, CancellationToken cancellationToken)
@@ -40,6 +44,19 @@ public class ChemicalsController : ControllerBase
         var chemical = await _catalog.ResolveByNameAsync(name, cancellationToken);
         if (chemical is null)
             throw new NotFoundException($"Chemical '{name}' was not found in PubChem.");
+        return Ok(chemical);
+    }
+
+    /// <summary>
+    /// Резолвит вещество по PubChem CID (выбор конкретного изомера из результатов
+    /// поиска по формуле или CAS).
+    /// </summary>
+    [HttpGet("resolve-cid/{cid:int}")]
+    public async Task<IActionResult> ResolveByCid(int cid, CancellationToken cancellationToken)
+    {
+        var chemical = await _catalog.ResolveByCidAsync(cid, cancellationToken);
+        if (chemical is null)
+            throw new NotFoundException($"Chemical with CID {cid} was not found in PubChem.");
         return Ok(chemical);
     }
 }

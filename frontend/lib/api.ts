@@ -95,6 +95,15 @@ export interface ChemicalDto {
   smiles: string | null;
 }
 
+// Кандидат автоподсказки: cid заполнен для каталога/CAS/формулы, null — для имени.
+export interface ChemicalSuggestion {
+  pubChemCid: number | null;
+  name: string;
+  formula: string | null;
+  // local | name | formula | cas
+  matchType: "local" | "name" | "formula" | "cas";
+}
+
 export interface ConditionsDto {
   temperatureCelsius: number;
   pressureKPa: number | null;
@@ -276,11 +285,13 @@ async function parseErrorMessage(res: Response): Promise<string> {
 }
 
 async function request<T>(path: string, options: RequestInit = {}, isRetry = false): Promise<T> {
+  // Для FormData заголовок Content-Type задаёт сам браузер вместе с boundary multipart.
+  const isFormData = typeof FormData !== "undefined" && options.body instanceof FormData;
   const res = await fetch(`${BASE_URL}${path}`, {
     ...options,
     credentials: "include",
     headers: {
-      "Content-Type": "application/json",
+      ...(isFormData ? {} : { "Content-Type": "application/json" }),
       ...(accessToken ? { Authorization: `Bearer ${accessToken}` } : {}),
       ...options.headers,
     },
@@ -327,9 +338,11 @@ export const api = {
 
   // Chemicals (PubChem catalog)
   suggestChemicals: (query: string, limit = 8) =>
-    request<string[]>(`/chemicals/suggest?query=${encodeURIComponent(query)}&limit=${limit}`),
+    request<ChemicalSuggestion[]>(`/chemicals/suggest?query=${encodeURIComponent(query)}&limit=${limit}`),
   resolveChemical: (name: string) =>
     request<ChemicalDto>(`/chemicals/resolve?name=${encodeURIComponent(name)}`),
+  resolveChemicalByCid: (cid: number) =>
+    request<ChemicalDto>(`/chemicals/resolve-cid/${cid}`),
 
   // Formulations
   listProjects: () => request<ProjectDto[]>("/projects"),
@@ -377,6 +390,37 @@ export const api = {
   // Knowledge
   listDocuments: (projectId?: string) =>
     request<KnowledgeDocumentDto[]>("/knowledge/documents" + (projectId ? `?projectId=${encodeURIComponent(projectId)}` : "")),
+  uploadDocument: (input: {
+    title: string;
+    sourceType: string;
+    reference?: string;
+    content: string;
+    projectId?: string;
+  }) =>
+    request<KnowledgeDocumentDto>("/knowledge/documents", {
+      method: "POST",
+      body: JSON.stringify({
+        title: input.title,
+        sourceType: input.sourceType,
+        reference: input.reference ?? "",
+        content: input.content,
+        projectId: input.projectId ?? null,
+      }),
+    }),
+  uploadDocumentFile: (
+    file: File,
+    meta?: { sourceType?: string; reference?: string; projectId?: string }
+  ) => {
+    const form = new FormData();
+    form.append("file", file);
+    if (meta?.sourceType) form.append("sourceType", meta.sourceType);
+    if (meta?.reference) form.append("reference", meta.reference);
+    if (meta?.projectId) form.append("projectId", meta.projectId);
+    return request<KnowledgeDocumentDto>("/knowledge/documents/upload", {
+      method: "POST",
+      body: form,
+    });
+  },
   searchKnowledge: (query: string, projectId?: string) =>
     request<SearchResultDto[]>("/knowledge/search", {
       method: "POST",

@@ -12,22 +12,42 @@ public record ChemicalDto(
     string? Smiles);
 
 /// <summary>
-/// Доступ к каталогу химических веществ: автоподсказки по названию,
-/// резолв конкретного вещества с кэшированием и выборка по набору CID.
+/// Кандидат автоподсказки. Если PubChemCid заполнен — вещество однозначно определено
+/// (результат поиска по формуле/CAS или попадание в локальный каталог), и клиент может
+/// резолвить его по CID. Если CID пуст — это вариант названия из автодополнения,
+/// который резолвится по имени.
+/// </summary>
+public record ChemicalSuggestion(
+    int? PubChemCid,
+    string Name,
+    string? Formula,
+    string MatchType);
+
+/// <summary>
+/// Доступ к каталогу химических веществ: унифицированный поиск по названию,
+/// CAS-номеру или молекулярной формуле, резолв вещества с кэшированием и
+/// выборка по набору CID.
 /// </summary>
 public interface IChemicalCatalogService
 {
     /// <summary>
-    /// Быстрые подсказки названий для автодополнения (без свойств).
+    /// Подсказки для автодополнения. Понимает название/синоним, CAS-номер и
+    /// молекулярную формулу; объединяет локальный каталог с результатами PubChem.
     /// Результаты кэшируются в памяти.
     /// </summary>
-    Task<IReadOnlyList<string>> SuggestNamesAsync(string query, int limit, CancellationToken cancellationToken = default);
+    Task<IReadOnlyList<ChemicalSuggestion>> SuggestAsync(string query, int limit, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Резолвит вещество по названию через PubChem и кэширует результат в БД.
     /// Возвращает null, если вещество не найдено.
     /// </summary>
     Task<ChemicalDto?> ResolveByNameAsync(string name, CancellationToken cancellationToken = default);
+
+    /// <summary>
+    /// Резолвит конкретное вещество по PubChem CID (выбор из изомеров при поиске
+    /// по формуле) и кэширует результат в БД.
+    /// </summary>
+    Task<ChemicalDto?> ResolveByCidAsync(int cid, CancellationToken cancellationToken = default);
 
     /// <summary>
     /// Возвращает кэшированные записи каталога по набору CID (один запрос к БД).

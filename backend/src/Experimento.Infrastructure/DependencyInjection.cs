@@ -37,6 +37,7 @@ public static class DependencyInjection
         // Knowledge
         services.AddScoped<ChunkingService>();
         services.AddScoped<IVectorSearchService, VectorSearchService>();
+        services.AddSingleton<IDocumentTextExtractor, Knowledge.Extraction.DocumentTextExtractor>();
 
         // Chemical catalog (PubChem): in-memory cache for suggestions, DB cache for resolved substances.
         services.AddMemoryCache();

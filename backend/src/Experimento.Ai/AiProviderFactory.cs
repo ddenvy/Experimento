@@ -77,9 +77,12 @@ public static class AiProviderFactory
             case "gemini":
                 var geminiKey = config["Ai:Gemini:ApiKey"];
                 var geminiModel = (config["Ai:Gemini:ChatModel"] ?? "gemini-3.5-flash-lite").Replace("models/", "");
+                // Эмбеддинги доступны только через API v1 (модели gemini-embedding-*).
+                var geminiEmbeddingModel = (config["Ai:Gemini:EmbeddingModel"] ?? "gemini-embedding-001").Replace("models/", "");
                 if (!string.IsNullOrEmpty(geminiKey))
                 {
                     chatService = new DirectGeminiChatCompletionService(SharedHttpClient, geminiModel, geminiKey);
+                    embeddingService = new DirectGeminiEmbeddingGenerationService(SharedHttpClient, geminiEmbeddingModel, geminiKey);
                 }
                 break;
         }

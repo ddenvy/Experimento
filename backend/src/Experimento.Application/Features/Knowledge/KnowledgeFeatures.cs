@@ -57,15 +57,9 @@ public class UploadDocumentHandler : IRequestHandler<UploadDocumentCommand, Know
         _db.KnowledgeDocuments.Add(doc);
         await _db.SaveChangesAsync(ct);
 
-        // Сырой контент сохраняется первым чанком; консьюмер затем разобьёт его и построит эмбеддинги.
-        _db.KnowledgeChunks.Add(new KnowledgeChunk
-        {
-            DocumentId = doc.Id,
-            ChunkIndex = 0,
-            Content = request.Content
-        });
-        await _db.SaveChangesAsync(ct);
-        await _publish.Publish(new Messaging.IngestDocumentCommand(doc.Id), ct);
+        // Чанкинг и эмбеддинги строит консьюмер; сырой контент передаём в сообщении,
+        // чтобы не вставлять временную строку с пустым вектором (vector(1536) NOT NULL).
+        await _publish.Publish(new Messaging.IngestDocumentCommand(doc.Id, request.Content), ct);
 
         return new KnowledgeDocumentDto(doc.Id, doc.Title, doc.SourceType.ToString(), doc.Reference, doc.Status, doc.UploadedAtUtc);
     }

@@ -1,8 +1,6 @@
 import type { Metadata } from "next";
 import { Manrope } from "next/font/google";
 import "./globals.css";
-import { Sidebar } from "@/components/layout/Sidebar";
-import { AuthGuard } from "@/components/AuthGuard";
 
 const manrope = Manrope({
   subsets: ["latin"],
@@ -19,14 +17,7 @@ export default function RootLayout({
 }: Readonly<{ children: React.ReactNode }>) {
   return (
     <html lang="en" className={manrope.variable}>
-      <body className="min-h-screen bg-background font-sans antialiased">
-        <AuthGuard>
-          <div className="flex min-h-screen">
-            <Sidebar />
-            <main className="flex-1 p-6 md:p-8">{children}</main>
-          </div>
-        </AuthGuard>
-      </body>
+      <body className="min-h-screen bg-background font-sans antialiased">{children}</body>
     </html>
   );
 }

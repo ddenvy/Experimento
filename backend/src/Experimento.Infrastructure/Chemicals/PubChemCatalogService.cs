@@ -11,6 +11,7 @@ namespace Experimento.Infrastructure.Chemicals;
 
 /// <summary>
 /// Клиент каталога PubChem (PUG REST + Autocomplete).
+/// Пониманием одно поле поиска: название/синоним, CAS-номер и молекулярная формула.
 /// Автоподсказки кэшируются в памяти, результаты резолва навсегда сохраняются
 /// в таблицу ChemicalCatalog — повторный выбор вещества не требует внешних запросов.
 /// </summary>
@@ -23,6 +24,7 @@ public class PubChemCatalogService : IChemicalCatalogService
 
     private static readonly TimeSpan SuggestCacheTtl = TimeSpan.FromMinutes(30);
     private static readonly Regex CasPattern = new(@"^\d{2,7}-\d{2}-\d$", RegexOptions.Compiled);
+    private const string PropertyFields = "Title,MolecularFormula,MolecularWeight,CanonicalSMILES";
 
     public PubChemCatalogService(IHttpClientFactory httpFactory, IAppDbContext db,
         IMemoryCache cache, ILogger<PubChemCatalogService> logger)
@@ -33,28 +35,49 @@ public class PubChemCatalogService : IChemicalCatalogService
         _logger = logger;
     }
 
-    public async Task<IReadOnlyList<string>> SuggestNamesAsync(string query, int limit, CancellationToken cancellationToken = default)
+    public async Task<IReadOnlyList<ChemicalSuggestion>> SuggestAsync(string query, int limit, CancellationToken cancellationToken = default)
     {
         query = query.Trim();
-        if (query.Length < 2) return Array.Empty<string>();
+        if (query.Length < 2) return Array.Empty<ChemicalSuggestion>();
+        limit = Math.Clamp(limit, 1, 20);
 
-        var cacheKey = $"pubchem:suggest:{limit}:{query.ToLowerInvariant()}";
-        if (_cache.TryGetValue<List<string>>(cacheKey, out var cached) && cached is not null)
+        var cacheKey = $"pubchem:suggest:v2:{limit}:{query.ToLowerInvariant()}";
+        if (_cache.TryGetValue<List<ChemicalSuggestion>>(cacheKey, out var cached) && cached is not null)
             return cached;
 
-        var url = $"/rest/autocomplete/compound/{Uri.EscapeDataString(query)}/json?limit={Math.Clamp(limit, 1, 20)}";
-        using var doc = await GetJsonAsync(url, cancellationToken);
-        if (doc is null) return Array.Empty<string>();
+        var kind = ChemicalQueryClassifier.Classify(query);
 
-        var names = doc.RootElement
-            .TryGetProperty("dictionary_terms", out var terms) &&
-            terms.TryGetProperty("compound", out var compounds)
-                ? compounds.EnumerateArray().Select(e => e.GetString() ?? string.Empty)
-                    .Where(s => !string.IsNullOrWhiteSpace(s)).ToList()
-                : new List<string>();
+        // Локальный каталог и внешний источник опрашиваем параллельно.
+        var localTask = SearchLocalCatalogAsync(query, limit, cancellationToken);
+        var externalTask = kind switch
+        {
+            ChemicalQueryKind.Cas => SuggestByCasAsync(query, cancellationToken),
+            ChemicalQueryKind.Formula => SuggestByFormulaAsync(query, limit, cancellationToken),
+            _ => SuggestByAutocompleteAsync(query, limit, cancellationToken)
+        };
+        await Task.WhenAll(localTask, externalTask);
 
-        _cache.Set(cacheKey, names, SuggestCacheTtl);
-        return names;
+        // Слияние с дедупликацией: сначала локальные записи (мгновенные, с CID),
+        // затем внешние кандидаты с CID (формула/CAS), затем варианты названий без CID.
+        var result = new List<ChemicalSuggestion>();
+        var seenCids = new HashSet<int>();
+        var seenNames = new HashSet<string>(StringComparer.OrdinalIgnoreCase);
+
+        void AddRange(IEnumerable<ChemicalSuggestion> items)
+        {
+            foreach (var s in items)
+            {
+                if (s.PubChemCid is { } cid && !seenCids.Add(cid)) continue;
+                if (!seenNames.Add(s.Name)) continue;
+                if (result.Count < limit) result.Add(s);
+            }
+        }
+
+        AddRange(localTask.Result);
+        AddRange(externalTask.Result);
+
+        _cache.Set(cacheKey, result, SuggestCacheTtl);
+        return result;
     }
 
     public async Task<ChemicalDto?> ResolveByNameAsync(string name, CancellationToken cancellationToken = default)
@@ -65,49 +88,214 @@ public class PubChemCatalogService : IChemicalCatalogService
         // 1. Точное попадание в локальном каталоге (по каноническому имени, регистр игнорируем).
         var cachedByName = await _db.ChemicalCatalog
             .FirstOrDefaultAsync(e => e.CanonicalName.ToLower() == name.ToLower(), cancellationToken);
-        if (cachedByName is not null) return ToDto(cachedByName);
-
-        // 2. Запрос свойств в PubChem по названию (включая синонимы).
-        var propsUrl = $"/rest/pug/compound/name/{Uri.EscapeDataString(name)}/property/Title,MolecularFormula,MolecularWeight,CanonicalSMILES/JSON";
-        using var propsDoc = await GetJsonAsync(propsUrl, cancellationToken);
-        if (propsDoc is null ||
-            !propsDoc.RootElement.TryGetProperty("PropertyTable", out var table) ||
-            !table.TryGetProperty("Properties", out var properties) ||
-            properties.GetArrayLength() == 0)
+        if (cachedByName is not null)
         {
-            return null;
+            // Запись могла быть создана до появления структурных полей — дозаполним по CID.
+            return cachedByName.Smiles is not null && cachedByName.Formula is not null
+                ? ToDto(cachedByName)
+                : await ResolveByCidAsync(cachedByName.PubChemCid, cancellationToken);
         }
 
-        var p = properties[0];
+        // 2. Запрос свойств в PubChem по названию (namespace name понимает синонимы и CAS).
+        var propsUrl = $"/rest/pug/compound/name/{Uri.EscapeDataString(name)}/property/{PropertyFields}/JSON";
+        using var doc = await GetJsonAsync(propsUrl, cancellationToken);
+        if (!TryGetFirstProperty(doc, out var props)) return null;
+
+        return await UpsertFromPropertiesAsync(props, cancellationToken);
+    }
+
+    public async Task<ChemicalDto?> ResolveByCidAsync(int cid, CancellationToken cancellationToken = default)
+    {
+        if (cid <= 0) return null;
+
+        var existing = await _db.ChemicalCatalog
+            .FirstOrDefaultAsync(e => e.PubChemCid == cid, cancellationToken);
+        if (existing is not null && existing.Smiles is not null && existing.Formula is not null && existing.MolarMass > 0)
+            return ToDto(existing);
+
+        var url = $"/rest/pug/compound/cid/{cid}/property/{PropertyFields}/JSON";
+        using var doc = await GetJsonAsync(url, cancellationToken);
+        if (!TryGetFirstProperty(doc, out var props))
+            return existing is not null ? ToDto(existing) : null;
+
+        return await UpsertFromPropertiesAsync(props, cancellationToken);
+    }
+
+    public async Task<IReadOnlyList<ChemicalDto>> GetByCidsAsync(IReadOnlyList<int> cids, CancellationToken cancellationToken = default)
+    {
+        if (cids.Count == 0) return Array.Empty<ChemicalDto>();
+        return await _db.ChemicalCatalog
+            .Where(e => cids.Contains(e.PubChemCid))
+            .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles))
+            .ToListAsync(cancellationToken);
+    }
+
+    // --- Источники автоподсказок -------------------------------------------------
+
+    /// <summary>Поиск в уже закэшированном локальном каталоге: по названию и CAS.</summary>
+    private async Task<List<ChemicalSuggestion>> SearchLocalCatalogAsync(string query, int limit, CancellationToken ct)
+    {
+        try
+        {
+            var pattern = "%" + query.Replace("\\", "\\\\").Replace("%", "\\%").Replace("_", "\\_") + "%";
+            var q = query.ToLowerInvariant();
+            return await _db.ChemicalCatalog
+                .Where(e => EF.Functions.ILike(e.CanonicalName, pattern)
+                            || (e.CasNumber != null && EF.Functions.ILike(e.CasNumber, pattern)))
+                .OrderByDescending(e => e.CanonicalName.ToLower().StartsWith(q))
+                .ThenBy(e => e.CanonicalName)
+                .Take(limit)
+                .Select(e => new ChemicalSuggestion(e.PubChemCid, e.CanonicalName, e.Formula, "local"))
+                .ToListAsync(ct);
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "Local chemical catalog search failed for '{Query}'", query);
+            return new List<ChemicalSuggestion>();
+        }
+    }
+
+    /// <summary>Автодополнение названий через PubChem Autocomplete (CID на этом шаге неизвестен).</summary>
+    private async Task<List<ChemicalSuggestion>> SuggestByAutocompleteAsync(string query, int limit, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"/rest/autocomplete/compound/{Uri.EscapeDataString(query)}/json?limit={limit}";
+            using var doc = await GetJsonAsync(url, ct);
+            if (doc is null ||
+                !doc.RootElement.TryGetProperty("dictionary_terms", out var terms) ||
+                !terms.TryGetProperty("compound", out var compounds))
+            {
+                return new List<ChemicalSuggestion>();
+            }
+
+            return compounds.EnumerateArray()
+                .Select(e => e.GetString())
+                .Where(s => !string.IsNullOrWhiteSpace(s))
+                .Select(s => new ChemicalSuggestion(null, s!, null, "name"))
+                .ToList();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PubChem autocomplete failed for '{Query}'", query);
+            return new List<ChemicalSuggestion>();
+        }
+    }
+
+    /// <summary>CAS-номер резолвится напрямую — это всегда один конкретный кандидат.</summary>
+    private async Task<List<ChemicalSuggestion>> SuggestByCasAsync(string cas, CancellationToken ct)
+    {
+        try
+        {
+            var url = $"/rest/pug/compound/name/{Uri.EscapeDataString(cas)}/property/Title,MolecularFormula/JSON";
+            using var doc = await GetJsonAsync(url, ct);
+            if (!TryGetFirstProperty(doc, out var p)) return new List<ChemicalSuggestion>();
+
+            var cid = p.GetProperty("CID").GetInt32();
+            var title = p.TryGetProperty("Title", out var t) ? t.GetString() ?? cas : cas;
+            var formula = p.TryGetProperty("MolecularFormula", out var f) ? f.GetString() : null;
+            return new List<ChemicalSuggestion> { new(cid, title, formula, "cas") };
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PubChem CAS lookup failed for '{Cas}'", cas);
+            return new List<ChemicalSuggestion>();
+        }
+    }
+
+    /// <summary>
+    /// Поиск по молекулярной формуле в PubChem асинхронный: первый запрос возвращает
+    /// ListKey, результаты забираются опросом. У формулы может быть много изомеров,
+    /// поэтому отдаём список, а не единственное вещество.
+    /// </summary>
+    private async Task<List<ChemicalSuggestion>> SuggestByFormulaAsync(string formula, int limit, CancellationToken ct)
+    {
+        var segment = "property/Title,MolecularFormula/JSON";
+        var escaped = Uri.EscapeDataString(formula);
+        try
+        {
+            using var first = await GetJsonAsync(
+                $"/rest/pug/compound/formula/{escaped}/{segment}?MaxRecords={limit}", ct);
+
+            if (TryGetPropertyArray(first, out var ready))
+                return MapFormulaSuggestions(ready);
+
+            var listKey = first is not null
+                          && first.RootElement.TryGetProperty("Waiting", out var waiting)
+                          && waiting.TryGetProperty("ListKey", out var keyElement)
+                ? keyElement.GetString()
+                : null;
+            if (listKey is null) return new List<ChemicalSuggestion>();
+
+            // Опрос готовности результата (обычно 1-2 секунды).
+            for (var attempt = 0; attempt < 5; attempt++)
+            {
+                await Task.Delay(TimeSpan.FromMilliseconds(700), ct);
+                using var poll = await GetJsonAsync(
+                    $"/rest/pug/compound/listkey/{listKey}/{segment}?MaxRecords={limit}", ct);
+                if (TryGetPropertyArray(poll, out var properties))
+                    return MapFormulaSuggestions(properties);
+                if (poll is not null && poll.RootElement.TryGetProperty("Fault", out _))
+                    break;
+                // Иначе снова Waiting — повторяем опрос.
+            }
+            return new List<ChemicalSuggestion>();
+        }
+        catch (Exception ex)
+        {
+            _logger.LogWarning(ex, "PubChem formula search failed for '{Formula}'", formula);
+            return new List<ChemicalSuggestion>();
+        }
+    }
+
+    private static List<ChemicalSuggestion> MapFormulaSuggestions(JsonElement properties)
+    {
+        var result = new List<ChemicalSuggestion>();
+        foreach (var p in properties.EnumerateArray())
+        {
+            var cid = p.GetProperty("CID").GetInt32();
+            var title = p.TryGetProperty("Title", out var t) ? t.GetString() ?? $"CID {cid}" : $"CID {cid}";
+            var formula = p.TryGetProperty("MolecularFormula", out var f) ? f.GetString() : null;
+            result.Add(new ChemicalSuggestion(cid, title, formula, "formula"));
+        }
+        return result;
+    }
+
+    // --- Кэширование полной записи ----------------------------------------------
+
+    /// <summary>
+    /// Создаёт или дозаполняет запись каталога по свойствам, полученным из PubChem.
+    /// CAS и SMILES подтягиваются только при первом полном резолве (доп. запросы).
+    /// </summary>
+    private async Task<ChemicalDto> UpsertFromPropertiesAsync(JsonElement p, CancellationToken ct)
+    {
         var cid = p.GetProperty("CID").GetInt32();
-        var title = p.TryGetProperty("Title", out var t) ? t.GetString() ?? name : name;
+        var title = p.TryGetProperty("Title", out var t) ? t.GetString() ?? $"CID {cid}" : $"CID {cid}";
         var formula = p.TryGetProperty("MolecularFormula", out var f) ? f.GetString() : null;
-        var smiles = p.TryGetProperty("CanonicalSMILES", out var s) ? s.GetString() : null;
+        var smiles = ReadSmiles(p);
         var molarMass = p.TryGetProperty("MolecularWeight", out var mw) && double.TryParse(mw.GetString(),
             System.Globalization.CultureInfo.InvariantCulture, out var parsed) ? parsed : 0;
 
-        // 3. Вещество могло быть закэшировано раньше под другим именем (синонимом) — CID совпадёт.
-        //    Дозаполняем SMILES для записей, созданных до появления структурных полей.
-        var existing = await _db.ChemicalCatalog.FirstOrDefaultAsync(e => e.PubChemCid == cid, cancellationToken);
+        var existing = await _db.ChemicalCatalog.FirstOrDefaultAsync(e => e.PubChemCid == cid, ct);
         if (existing is not null)
         {
             var changed = false;
             if (existing.Smiles is null && smiles is not null) { existing.Smiles = smiles; changed = true; }
             if (existing.Formula is null && formula is not null) { existing.Formula = formula; changed = true; }
+            if (existing.MolarMass == 0 && molarMass > 0) { existing.MolarMass = molarMass; changed = true; }
             if (existing.CasNumber is null)
             {
-                try { existing.CasNumber = await FetchPrimaryCasAsync(cid, cancellationToken); changed = true; }
+                try { existing.CasNumber = await FetchPrimaryCasAsync(cid, ct); changed = true; }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to fetch synonyms/CAS for CID {Cid}", cid); }
             }
-            if (changed) await _db.SaveChangesAsync(cancellationToken);
+            if (changed) await _db.SaveChangesAsync(ct);
             return ToDto(existing);
         }
 
-        // 4. CAS-номер берём из списка синонимов (доп. запрос, только при первом резолве).
         string? cas = null;
         try
         {
-            cas = await FetchPrimaryCasAsync(cid, cancellationToken);
+            cas = await FetchPrimaryCasAsync(cid, ct);
         }
         catch (Exception ex)
         {
@@ -115,7 +303,6 @@ public class PubChemCatalogService : IChemicalCatalogService
             _logger.LogWarning(ex, "Failed to fetch synonyms/CAS for CID {Cid}", cid);
         }
 
-        // 5. Кэшируем запись в БД.
         var entry = new ChemicalCatalogEntry
         {
             PubChemCid = cid,
@@ -126,18 +313,9 @@ public class PubChemCatalogService : IChemicalCatalogService
             MolarMass = molarMass
         };
         _db.ChemicalCatalog.Add(entry);
-        await _db.SaveChangesAsync(cancellationToken);
+        await _db.SaveChangesAsync(ct);
 
         return ToDto(entry);
-    }
-
-    public async Task<IReadOnlyList<ChemicalDto>> GetByCidsAsync(IReadOnlyList<int> cids, CancellationToken cancellationToken = default)
-    {
-        if (cids.Count == 0) return Array.Empty<ChemicalDto>();
-        return await _db.ChemicalCatalog
-            .Where(e => cids.Contains(e.PubChemCid))
-            .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles))
-            .ToListAsync(cancellationToken);
     }
 
     private async Task<string?> FetchPrimaryCasAsync(int cid, CancellationToken ct)
@@ -161,6 +339,37 @@ public class PubChemCatalogService : IChemicalCatalogService
                 return value;
         }
         return null;
+    }
+
+    // --- HTTP и разбор JSON ------------------------------------------------------
+
+    /// <summary>
+    /// PubChem мигрировал с имени CanonicalSMILES на ConnectivitySMILES — принимаем
+    /// все известные варианты, чтобы структурные поля не оставались пустыми.
+    /// </summary>
+    private static string? ReadSmiles(JsonElement p)
+    {
+        if (p.TryGetProperty("ConnectivitySMILES", out var connectivity)) return connectivity.GetString();
+        if (p.TryGetProperty("CanonicalSMILES", out var canonical)) return canonical.GetString();
+        return p.TryGetProperty("SMILES", out var generic) ? generic.GetString() : null;
+    }
+
+    private static bool TryGetPropertyArray(JsonDocument? doc, out JsonElement properties)
+    {
+        properties = default;
+        return doc is not null
+               && doc.RootElement.TryGetProperty("PropertyTable", out var table)
+               && table.TryGetProperty("Properties", out properties)
+               && properties.ValueKind == JsonValueKind.Array
+               && properties.GetArrayLength() > 0;
+    }
+
+    private static bool TryGetFirstProperty(JsonDocument? doc, out JsonElement property)
+    {
+        property = default;
+        if (!TryGetPropertyArray(doc, out var array)) return false;
+        property = array[0];
+        return true;
     }
 
     private async Task<JsonDocument?> GetJsonAsync(string relativeUrl, CancellationToken ct)
