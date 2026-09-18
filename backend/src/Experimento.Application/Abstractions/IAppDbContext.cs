@@ -28,6 +28,7 @@ public interface IAppDbContext
     DbSet<AuditEntry> AuditEntries { get; }
     DbSet<ChemicalCatalogEntry> ChemicalCatalog { get; }
     DbSet<ChemicalRegulation> ChemicalRegulations { get; }
+    DbSet<StabilityStudy> StabilityStudies { get; }
 
     Task<int> SaveChangesAsync(CancellationToken cancellationToken = default);
 }

@@ -209,6 +209,50 @@ export interface NextExperimentPlanDto {
   recommendations: NextExperimentDto[];
 }
 
+// Насколько расчёт срока годности подтверждён данными.
+export type StabilityConfidence = "Low" | "Medium" | "High";
+
+export interface StabilityPointDto {
+  id: string;
+  temperatureCelsius: number;
+  timeDays: number;
+  assayPercent: number;
+}
+
+export interface StabilityStudyDto {
+  id: string;
+  versionId: string;
+  versionNumber: number;
+  notes: string | null;
+  createdAtUtc: string;
+  points: StabilityPointDto[];
+}
+
+export interface StabilityRateDto {
+  temperatureCelsius: number;
+  measurements: number;
+  rateConstantPerDay: number;
+  rSquared: number | null;
+  shelfLifeDays: number | null;
+}
+
+export interface StabilityAssessmentDto {
+  versionId: string;
+  activationEnergyKjPerMol: number | null;
+  shelfLifeDaysAt25C: number | null;
+  summary: string;
+  confidence: StabilityConfidence;
+  rates: StabilityRateDto[];
+  warnings: string[];
+  assumptions: string[];
+}
+
+export interface StabilityPointInput {
+  temperatureCelsius: number;
+  timeDays: number;
+  assayPercent: number;
+}
+
 export interface JobDto {
   id: string;
   versionId: string;
@@ -577,6 +621,19 @@ export const api = {
     ),
   getNextExperiments: (formulationId: string, limit = 5) =>
     request<NextExperimentPlanDto>(`/formulations/${formulationId}/next-experiments?limit=${limit}`),
+
+  // Stability studies (shelf life)
+  createStabilityStudy: (versionId: string, data: { points: StabilityPointInput[]; notes?: string }) =>
+    request<StabilityStudyDto>(`/formulations/versions/${versionId}/stability-studies`, {
+      method: "POST",
+      body: JSON.stringify(data),
+    }),
+  listStabilityStudies: (versionId: string) =>
+    request<StabilityStudyDto[]>(`/formulations/versions/${versionId}/stability-studies`),
+  getStabilityAssessment: (studyId: string) =>
+    request<StabilityAssessmentDto>(`/formulations/stability-studies/${studyId}/assessment`),
+  deleteStabilityStudy: (studyId: string) =>
+    request<void>(`/formulations/stability-studies/${studyId}`, { method: "DELETE" }),
 
   // Predictions
   submitPrediction: (versionId: string) =>

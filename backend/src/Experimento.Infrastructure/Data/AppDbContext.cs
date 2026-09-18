@@ -30,6 +30,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
     public DbSet<ChemicalCatalogEntry> ChemicalCatalog => Set<ChemicalCatalogEntry>();
     public DbSet<ChemicalRegulation> ChemicalRegulations => Set<ChemicalRegulation>();
+    public DbSet<StabilityStudy> StabilityStudies => Set<StabilityStudy>();
 
     protected override void OnModelCreating(ModelBuilder modelBuilder)
     {
@@ -120,6 +121,21 @@ public class AppDbContext : DbContext, IAppDbContext
                 .WithMany()
                 .HasForeignKey(r => r.ChemicalCatalogEntryId)
                 .OnDelete(DeleteBehavior.Cascade);
+        });
+
+        // Исследования стабильности: точки — часть исследования и удаляются вместе с ним.
+        modelBuilder.Entity<StabilityStudy>(b =>
+        {
+            b.HasIndex(s => s.VersionId);
+            b.HasMany(s => s.Points)
+                .WithOne(p => p.Study)
+                .HasForeignKey(p => p.StudyId)
+                .OnDelete(DeleteBehavior.Cascade);
+        });
+        modelBuilder.Entity<StabilityPoint>(b =>
+        {
+            b.ToTable("StabilityPoints");
+            b.HasIndex(p => p.StudyId);
         });
 
         base.OnModelCreating(modelBuilder);

@@ -701,6 +701,121 @@ test.describe("Authenticated workflow", () => {
     await expect(page.getByText("Lab outcomes:")).toBeVisible();
   });
 
+  test("stability tab: Arrhenius shelf life projection from experimental points", async ({ page, request }) => {
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Stability ${marker}`, description: "stability e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Stability Form ${marker}`, targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+
+    const versionResp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      }
+    );
+    expect(versionResp.ok()).toBeTruthy();
+
+    await page.goto(`/projects/${project.id}/formulations/${formulation.id}?tab=stability`);
+    await expect(page.getByRole("heading", { name: `Stability Form ${marker}` })).toBeVisible();
+    await expect(page.getByRole("tab", { name: "Stability" })).toBeVisible();
+    await expect(page.getByRole("heading", { name: "Stability data" })).toBeVisible();
+
+    // Ввод 12 точек: 3 температуры × 4 временные точки.
+    // Синтетические данные: k(25°C) = 0.0005/day, Ea = 80 kJ/mol.
+    const points = [
+      // 25 °C
+      { temp: "25", time: "0", assay: "100" },
+      { temp: "25", time: "30", assay: "98.51" },
+      { temp: "25", time: "60", assay: "97.04" },
+      { temp: "25", time: "90", assay: "95.60" },
+      // 40 °C
+      { temp: "40", time: "0", assay: "100" },
+      { temp: "40", time: "30", assay: "93.18" },
+      { temp: "40", time: "60", assay: "86.82" },
+      { temp: "40", time: "90", assay: "80.90" },
+      // 50 °C
+      { temp: "50", time: "0", assay: "100" },
+      { temp: "50", time: "30", assay: "83.42" },
+      { temp: "50", time: "60", assay: "69.59" },
+      { temp: "50", time: "90", assay: "58.06" },
+    ];
+
+    // Изначально 2 пустые строки — добавляем ещё 10.
+    const addBtn = page.getByRole("button", { name: "Add point" });
+    for (let i = 0; i < points.length - 2; i++) {
+      await addBtn.click();
+    }
+
+    const rows = page.getByTestId("stability-points").locator("div.items-center");
+    await expect(rows).toHaveCount(points.length);
+
+    for (let i = 0; i < points.length; i++) {
+      const row = rows.nth(i);
+      await row.locator("input").nth(0).fill(points[i].temp);
+      await row.locator("input").nth(1).fill(points[i].time);
+      await row.locator("input").nth(2).fill(points[i].assay);
+    }
+
+    await page.getByTestId("save-stability-study").click();
+
+    // Исследование появляется в списке.
+    const studyList = page.getByTestId("stability-study-list");
+    await expect(studyList.locator("li")).toHaveCount(1);
+    await expect(studyList).toContainText("12 points");
+
+    // Карточка оценки рендерится сразу (автоматически выбирается созданное исследование).
+    const assessment = page.getByTestId("stability-assessment");
+    await expect(assessment).toBeVisible();
+    await expect(assessment).toContainText("High confidence");
+
+    // t90 ≈ 210.7 дней ≈ 6.9 месяцев.
+    const shelfLife = page.getByTestId("stability-shelf-life");
+    await expect(shelfLife).toContainText("months");
+    await expect(shelfLife).toContainText("days");
+    const shelfText = await shelfLife.textContent();
+    expect(shelfText).toMatch(/6\.[89] months/);
+    expect(shelfText).toMatch(/21[0-5] days/);
+
+    // Энергия активации ≈ 80 kJ/mol (округление до одного знака после запятой).
+    await expect(assessment).toContainText(/79\.[0-9] kJ\/mol/);
+
+    // Предупреждений нет — данные качественные.
+    await expect(assessment.getByText("Data quality")).toHaveCount(0);
+
+    // Таблица по температурам: 3 строки.
+    await expect(assessment.locator("tbody tr")).toHaveCount(3);
+    await expect(assessment.locator("tbody tr").first()).toContainText("25 °C");
+  });
+
   test("knowledge base: upload a laboratory notebook scan, OCR it and find it semantically", async ({ page }) => {
     await page.goto("/knowledge");
     await expect(page.getByRole("heading", { name: "Knowledge Base" })).toBeVisible();

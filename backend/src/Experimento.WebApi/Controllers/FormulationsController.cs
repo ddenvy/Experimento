@@ -64,4 +64,36 @@ public class FormulationsController : BaseController
     [HttpGet("{formulationId:guid}/next-experiments")]
     public async Task<IActionResult> GetNextExperiments(Guid formulationId, [FromQuery] int limit = 5)
         => Ok(await Mediator.Send(new GetNextExperimentsQuery(formulationId, limit, UserId)));
+
+    /// <summary>
+    /// Исследование стабильности версии: точки «температура — время — содержание».
+    /// По ним считается срок годности (t90) с переносом на температуру хранения.
+    /// </summary>
+    [HttpPost("versions/{versionId:guid}/stability-studies")]
+    public async Task<IActionResult> CreateStabilityStudy(Guid versionId, [FromBody] CreateStabilityStudyCommand cmd)
+    {
+        var result = await Mediator.Send(cmd with { VersionId = versionId, CreatedBy = UserId });
+        await AuditAsync("StabilityStudy.Create", "StabilityStudy", result.Id.ToString(), cmd);
+        return Ok(result);
+    }
+
+    [HttpGet("versions/{versionId:guid}/stability-studies")]
+    public async Task<IActionResult> ListStabilityStudies(Guid versionId)
+        => Ok(await Mediator.Send(new ListStabilityStudiesQuery(versionId, UserId)));
+
+    /// <summary>
+    /// Расчёт срока годности по данным исследования: кинетика первого порядка,
+    /// энергия активации по Аррениусу и t90 при 25 °C, с предупреждениями о качестве данных.
+    /// </summary>
+    [HttpGet("stability-studies/{studyId:guid}/assessment")]
+    public async Task<IActionResult> GetStabilityAssessment(Guid studyId)
+        => Ok(await Mediator.Send(new GetStabilityAssessmentQuery(studyId, UserId)));
+
+    [HttpDelete("stability-studies/{studyId:guid}")]
+    public async Task<IActionResult> DeleteStabilityStudy(Guid studyId)
+    {
+        await Mediator.Send(new DeleteStabilityStudyCommand(studyId, UserId));
+        await AuditAsync("StabilityStudy.Delete", "StabilityStudy", studyId.ToString(), new { studyId });
+        return NoContent();
+    }
 }

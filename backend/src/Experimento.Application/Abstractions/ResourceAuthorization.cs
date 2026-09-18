@@ -16,6 +16,10 @@ public sealed class ResourceAuthorization(IAppDbContext db)
         db.FormulationVersions.AnyAsync(
             v => v.Id == versionId && v.Formulation.Project.CreatedBy == userId, ct);
 
+    public Task<bool> OwnsStabilityStudyAsync(Guid studyId, Guid userId, CancellationToken ct) =>
+        db.StabilityStudies.AnyAsync(
+            s => s.Id == studyId && s.Version.Formulation.Project.CreatedBy == userId, ct);
+
     public Task<bool> OwnsFormulationAsync(Guid formulationId, Guid userId, CancellationToken ct) =>
         db.Formulations.AnyAsync(
             f => f.Id == formulationId && f.Project.CreatedBy == userId, ct);
