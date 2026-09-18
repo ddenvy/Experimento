@@ -747,4 +747,11 @@ export const api = {
   // Пакет аудита — Markdown-текст, не JSON.
   exportAuditPackage: () =>
     request<string>("/audit/export", {}, false, (res) => res.text()),
+
+  // Demo / onboarding
+  provisionDemoData: () =>
+    request<{ projectId: string; formulationId: string; formulationVersions: number }>(
+      "/demo/provision",
+      { method: "POST" }
+    ),
 };

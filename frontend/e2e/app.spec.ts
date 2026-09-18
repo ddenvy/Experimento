@@ -701,6 +701,56 @@ test.describe("Authenticated workflow", () => {
     await expect(page.getByText("Lab outcomes:")).toBeVisible();
   });
 
+  test("onboarding: empty dashboard offers a one-click demo with the full R&D cycle", async ({ page, request }) => {
+    // Новый пользователь: до клика у него нет ни одного проекта.
+    const email = `demo_${Date.now()}@experimento.test`;
+    const password = "E2eTest12345!";
+    const regResp = await request.post("http://localhost:5126/api/auth/register", {
+      data: { email, password, displayName: "Demo User" },
+    });
+    expect(regResp.ok()).toBeTruthy();
+    const loginResp = await request.post("http://localhost:5126/api/auth/login", {
+      data: { email, password },
+    });
+    const auth = await loginResp.json();
+    const authHeader = { Authorization: `Bearer ${auth.accessToken}` };
+    // Перезаписываем refresh-cookie админа из beforeEach на нового пользователя.
+    const storage = await request.storageState();
+    await page.context().addCookies(storage.cookies as Parameters<typeof injectAuth>[1]);
+
+    await page.goto("/dashboard");
+    const banner = page.getByTestId("onboarding-demo");
+    await expect(banner).toBeVisible();
+    await expect(banner).toContainText("ready-made R&D project");
+
+    await page.getByTestId("load-demo").click();
+
+    // Редирект прямо на демо-формуляцию.
+    await expect(page).toHaveURL(/\/projects\/[0-9a-f-]+\/formulations\/[0-9a-f-]+$/);
+    await expect(page.getByRole("heading", { name: "Aspirin IR Tablet 500 mg" })).toBeVisible();
+
+    // Демо-данные реально наполнены: на вкладке Stability уже есть исследование.
+    await page.getByRole("tab", { name: "Stability" }).click();
+    await expect(page.getByTestId("stability-study-list")).toContainText("12 points", {
+      timeout: 10000,
+    });
+    await page.getByTestId("stability-study-list").locator("li").first().click();
+    await expect(page.getByTestId("stability-assessment")).toContainText("High confidence");
+
+    // Повторный provision идемпотентен: возвращает тот же проект, дубль не создаётся.
+    const projects = await (
+      await request.get("http://localhost:5126/api/projects", { headers: authHeader })
+    ).json();
+    const demoProjects = projects.filter(
+      (p: { name: string }) => p.name === "Demo: Aspirin Tablet 500mg"
+    );
+    expect(demoProjects).toHaveLength(1);
+
+    // После создания демо онбординг-баннер на дашборде больше не показывается.
+    await page.goto("/dashboard");
+    await expect(page.getByTestId("onboarding-demo")).toHaveCount(0);
+  });
+
   test("stability tab: Arrhenius shelf life projection from experimental points", async ({ page, request }) => {
     const authHeader = { Authorization: `Bearer ${token}` };
     const marker = Date.now();
