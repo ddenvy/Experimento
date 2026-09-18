@@ -10,7 +10,11 @@ import { Search, Loader2, Upload, FileText, X } from "lucide-react";
 const SOURCE_TYPES = ["Patent", "Paper", "InternalExperiment"] as const;
 const MAX_CONTENT = 200_000;
 const MAX_FILE_BYTES = 10 * 1024 * 1024;
-const ACCEPTED_EXTENSIONS = [".pdf", ".docx", ".txt", ".md", ".csv", ".xls", ".xlsx"];
+const ACCEPTED_EXTENSIONS = [
+  ".pdf", ".docx", ".txt", ".md", ".csv", ".xls", ".xlsx",
+  // Фотографии и сканы страниц лабораторного журнала распознаются мультимодальной моделью.
+  ".png", ".jpg", ".jpeg", ".webp",
+];
 
 // Цвет бейджа по статусу индексации.
 function StatusBadge({ status }: { status: string }) {
@@ -194,7 +198,7 @@ export default function KnowledgePage() {
               />
             </div>
 
-            {/* Выбор файла: PDF/DOCX/TXT/MD/CSV/XLS/XLSX, до 10 МБ */}
+            {/* Выбор файла: PDF/DOCX/TXT/MD/CSV/XLS/XLSX и сканы журнала (PNG/JPEG/WEBP), до 10 МБ */}
             <div className="flex items-center gap-2">
               <input
                 ref={fileInputRef}
@@ -230,7 +234,7 @@ export default function KnowledgePage() {
                   onClick={() => fileInputRef.current?.click()}
                 >
                   <Upload className="h-4 w-4" />
-                  Choose file (PDF, DOCX, TXT, MD, CSV, XLS, XLSX · max 10 MB)
+                  Choose file (PDF, DOCX, TXT, MD, CSV, XLS, XLSX, PNG, JPEG, WEBP · max 10 MB)
                 </Button>
               )}
             </div>

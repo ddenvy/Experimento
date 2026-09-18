@@ -28,9 +28,11 @@ public class KnowledgeController : BaseController
     }
 
     /// <summary>
-    /// Загрузка файла документа: PDF, DOCX, TXT, MD, CSV, XLS, XLSX (до 10 МБ).
-    /// Текст извлекается на сервере (таблицы — построчно "Заголовок: значение")
-    /// и далее проходит общий пайплайн чанкинга и эмбеддинга.
+    /// Загрузка файла документа: PDF, DOCX, TXT, MD, CSV, XLS, XLSX, а также фотографии
+    /// и сканы страниц лабораторного журнала (PNG, JPEG, WEBP) — до 10 МБ.
+    /// Текст извлекается на сервере (изображения распознаются мультимодальной моделью,
+    /// таблицы — построчно "Заголовок: значение") и далее проходит общий пайплайн
+    /// чанкинга и эмбеддинга.
     /// </summary>
     [HttpPost("documents/upload")]
     [RequestSizeLimit(MaxUploadBytes)]
@@ -59,13 +61,20 @@ public class KnowledgeController : BaseController
             await using var stream = file.OpenReadStream();
             content = await _extractor.ExtractAsync(fileName, stream, cancellationToken);
         }
+        catch (NotSupportedException ex)
+        {
+            // Например, распознавание изображений недоступно на текущем AI-провайдере.
+            throw new BadRequestException(ex.Message);
+        }
         catch (Exception ex) when (ex is InvalidDataException or IOException)
         {
             throw new BadRequestException($"Could not parse the file: {ex.Message}");
         }
 
         if (string.IsNullOrWhiteSpace(content))
-            throw new BadRequestException("No text could be extracted from the file (scanned PDFs without a text layer are not supported).");
+            throw new BadRequestException(
+                "No text could be extracted from the file. Images must contain legible laboratory notes; "
+                + "scanned PDFs without a text layer are not supported.");
         if (content.Length > MaxExtractedChars)
             throw new BadRequestException($"Extracted text is too long: {content.Length}/{MaxExtractedChars} characters.");
 

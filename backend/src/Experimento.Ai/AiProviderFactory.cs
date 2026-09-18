@@ -26,6 +26,7 @@ public static class AiProviderFactory
 
         IChatCompletionService? chatService = null;
         ITextEmbeddingGenerationService? embeddingService = null;
+        ILabNoteOcr? ocrService = null;
 
         switch (provider)
         {
@@ -83,6 +84,8 @@ public static class AiProviderFactory
                 {
                     chatService = new DirectGeminiChatCompletionService(SharedHttpClient, geminiModel, geminiKey);
                     embeddingService = new DirectGeminiEmbeddingGenerationService(SharedHttpClient, geminiEmbeddingModel, geminiKey);
+                    // Мультимодальный вход доступен только у Gemini — остальные провайдеры получают заглушку.
+                    ocrService = new GeminiVisionOcrService(SharedHttpClient, geminiModel, geminiKey);
                 }
                 break;
         }
@@ -90,6 +93,7 @@ public static class AiProviderFactory
         services.AddSingleton(chatService ?? new FallbackChatCompletionService());
         services.AddSingleton<IEmbeddingService>(sp =>
             new EmbeddingService(embeddingService, provider, sp.GetService<Microsoft.Extensions.Logging.ILogger<EmbeddingService>>()));
+        services.AddSingleton(ocrService ?? new UnavailableLabNoteOcr());
 
         services.AddScoped<IRationaleGenerator, RationaleGenerator>();
 

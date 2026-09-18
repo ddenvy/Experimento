@@ -1,5 +1,6 @@
 import { test, expect } from "@playwright/test";
 import { createHash } from "crypto";
+import { readFileSync } from "fs";
 import { injectAuth, loginApi } from "./helpers";
 
 /**
@@ -564,6 +565,34 @@ test.describe("Authenticated workflow", () => {
     await expect(page.getByTestId("substitute-list")).toBeVisible({ timeout: 15000 });
     await expect(panel).toContainText("Salicylic");
     await expect(panel).toContainText("% match");
+  });
+
+  test("knowledge base: upload a laboratory notebook scan, OCR it and find it semantically", async ({ page }) => {
+    await page.goto("/knowledge");
+    await expect(page.getByRole("heading", { name: "Knowledge Base" })).toBeVisible();
+
+    // Уникальное имя файла: документы глобальны и видны между прогонами.
+    const fileName = `E2EScan${Date.now()}.png`;
+    await page.locator('input[type="file"]').setInputFiles({
+      name: fileName,
+      mimeType: "image/png",
+      buffer: readFileSync("e2e/fixtures/lab-note.png"),
+    });
+    await expect(page.getByText(fileName, { exact: true })).toBeVisible();
+    await page.getByRole("button", { name: "Index document" }).click();
+
+    // Распознавание текста моделью + индексация занимают заметно больше времени, чем для текстовых файлов.
+    await expect(
+      page.locator("li").filter({ hasText: `Paper · ${fileName}` }).getByText("Ready", { exact: true })
+    ).toBeVisible({ timeout: 90_000 });
+
+    // Распознанное содержимое попадает в общий семантический поиск.
+    await page
+      .getByPlaceholder("Search literature, tables and internal notes…")
+      .fill("which solvent was used for the aspirin solubility experiment");
+    await page.getByRole("button", { name: "Search", exact: true }).click();
+    await expect(page.getByRole("heading", { name: "Results" })).toBeVisible({ timeout: 20000 });
+    await expect(page.getByText(/acetylsalicylic acid/).first()).toBeVisible();
   });
 
   test("knowledge base: index a document and find it via semantic search", async ({ page }) => {

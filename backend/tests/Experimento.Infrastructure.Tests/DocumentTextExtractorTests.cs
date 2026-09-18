@@ -1,3 +1,4 @@
+using Experimento.Application.Abstractions;
 using Experimento.Infrastructure.Knowledge.Extraction;
 using Xunit;
 
@@ -5,14 +6,39 @@ namespace Experimento.Infrastructure.Tests;
 
 public class DocumentTextExtractorTests
 {
-    private readonly DocumentTextExtractor _sut = new();
+    private readonly FakeOcr _ocr = new("LAB PAGE TRANSCRIPT");
+    private readonly DocumentTextExtractor _sut;
+
+    public DocumentTextExtractorTests() => _sut = new DocumentTextExtractor(_ocr);
+
+    /// <summary>Подменный OCR: запоминает MIME-тип и отдаёт заранее заданный текст.</summary>
+    private sealed class FakeOcr(string text) : ILabNoteOcr
+    {
+        public string? LastContentType { get; private set; }
+
+        public Task<string> TranscribeAsync(byte[] image, string contentType, CancellationToken cancellationToken = default)
+        {
+            LastContentType = contentType;
+            return Task.FromResult(text);
+        }
+    }
+
+    private sealed class UnavailableOcr : ILabNoteOcr
+    {
+        public Task<string> TranscribeAsync(byte[] image, string contentType, CancellationToken cancellationToken = default)
+            => throw new NotSupportedException("Image OCR is not available.");
+    }
 
     [Fact]
     public void SupportedExtensions_covers_all_advertised_formats()
     {
-        foreach (var ext in new[] { ".txt", ".md", ".csv", ".xls", ".xlsx", ".docx", ".pdf" })
+        foreach (var ext in new[]
+                 {
+                     ".txt", ".md", ".csv", ".xls", ".xlsx", ".docx", ".pdf",
+                     ".png", ".jpg", ".jpeg", ".webp"
+                 })
             Assert.Contains(ext, _sut.SupportedExtensions);
-        Assert.Equal(7, _sut.SupportedExtensions.Count);
+        Assert.Equal(11, _sut.SupportedExtensions.Count);
     }
 
     [Fact]
@@ -21,6 +47,47 @@ public class DocumentTextExtractorTests
         using var stream = new MemoryStream("x"u8.ToArray());
         await Assert.ThrowsAsync<ArgumentException>(() =>
             _sut.ExtractAsync("archive.zip", stream));
+    }
+
+    [Theory(DisplayName = "Images are routed to OCR with the matching content type")]
+    [InlineData("scan.png", "image/png")]
+    [InlineData("page.JPG", "image/jpeg")]
+    [InlineData("page.jpeg", "image/jpeg")]
+    [InlineData("page.webp", "image/webp")]
+    public async Task Image_is_routed_to_ocr(string fileName, string expectedContentType)
+    {
+        using var stream = new MemoryStream(new byte[] { 1, 2, 3 });
+        var result = await _sut.ExtractAsync(fileName, stream);
+
+        // Текст пришёл от OCR, а не от локального парсера.
+        Assert.Equal("LAB PAGE TRANSCRIPT", result);
+        Assert.Equal(expectedContentType, _ocr.LastContentType);
+    }
+
+    [Fact]
+    public async Task Image_transcript_is_trimmed()
+    {
+        var sut = new DocumentTextExtractor(new FakeOcr("  page text  \n"));
+        using var stream = new MemoryStream(new byte[] { 1 });
+        Assert.Equal("page text", await sut.ExtractAsync("note.png", stream));
+    }
+
+    [Fact]
+    public async Task Image_without_legible_content_yields_empty_text()
+    {
+        var sut = new DocumentTextExtractor(new FakeOcr("   "));
+        using var stream = new MemoryStream(new byte[] { 1 });
+        Assert.Equal(string.Empty, await sut.ExtractAsync("blank.png", stream));
+    }
+
+    [Fact]
+    public async Task Unavailable_ocr_surfaces_not_supported()
+    {
+        // Провайдер без поддержки изображений: ошибка должна дойти до вызывающего кода,
+        // чтобы контроллер вернул понятное 400, а не пустой документ.
+        var sut = new DocumentTextExtractor(new UnavailableOcr());
+        using var stream = new MemoryStream(new byte[] { 1 });
+        await Assert.ThrowsAsync<NotSupportedException>(() => sut.ExtractAsync("note.png", stream));
     }
 
     [Fact]
