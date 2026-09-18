@@ -1,3 +1,5 @@
+using Experimento.Domain.Exceptions;
+
 namespace Experimento.Domain.Entities;
 
 /// <summary>
@@ -16,19 +18,19 @@ public class StabilityStudy
     public ICollection<StabilityPoint> Points { get; set; } = new List<StabilityPoint>();
 
     /// <summary>
-    /// Validates the study's measurement points. Throws InvalidOperationException when rules are broken.
+    /// Validates the study's measurement points. Throws DomainException when rules are broken.
     /// </summary>
     public void EnsureValid()
     {
         if (Points.Count == 0)
-            throw new InvalidOperationException("A stability study must have at least one measurement point.");
+            throw new DomainException("A stability study must have at least one measurement point.");
 
         foreach (var point in Points)
         {
             if (point.TimeDays < 0)
-                throw new InvalidOperationException("Measurement time must not be negative.");
+                throw new DomainException("Measurement time must not be negative.");
             if (point.AssayPercent is <= 0 or > 100)
-                throw new InvalidOperationException(
+                throw new DomainException(
                     $"Assay of {point.AssayPercent}% is outside the (0, 100] range.");
         }
     }

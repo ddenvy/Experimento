@@ -54,8 +54,13 @@ public class EmbeddingService : IEmbeddingService
         var result = new float[texts.Count][];
         for (int i = 0; i < texts.Count; i++)
         {
+            // Пустой вектор от РЕАЛЬНОГО провайдера — это сбой, а не повод для fallback:
+            // fallback-векторы лежат в другом пространстве и тихо ломают семантический поиск.
             var vector = embeddings[i];
-            result[i] = vector.IsEmpty ? DeterministicFallback(texts[i]) : vector.ToArray();
+            if (vector.IsEmpty)
+                throw new InvalidOperationException(
+                    $"Embedding provider '{_provider}' returned an empty vector for input #{i}.");
+            result[i] = vector.ToArray();
         }
         return result;
     }

@@ -5,6 +5,7 @@ using Experimento.Ai;
 using Experimento.Application.Abstractions;
 using Experimento.Application.Behaviors;
 using Experimento.Application.Exceptions;
+using Experimento.Domain.Exceptions;
 using Experimento.Infrastructure;
 using Experimento.Infrastructure.Data;
 using Experimento.WebApi.Hubs;
@@ -13,6 +14,7 @@ using FluentValidation;
 using MassTransit;
 using MediatR;
 using Microsoft.AspNetCore.Authentication.JwtBearer;
+using Microsoft.AspNetCore.HttpOverrides;
 using Microsoft.AspNetCore.RateLimiting;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.IdentityModel.Tokens;
@@ -194,6 +196,15 @@ if (app.Environment.IsDevelopment())
     app.MapScalarApiReference();
 }
 
+// За TLS-терминирующим прокси Kestrel видит HTTP и адрес прокси: без этого middleware
+// refresh-cookie не получит флаг Secure (Request.IsHttps=false), а rate limiter делит
+// всех анонимов по одному IP. По умолчанию доверяем только loopback-прокси; для облачных
+// LB добавьте их сети в KnownNetworks/KnownProxies через конфигурацию.
+app.UseForwardedHeaders(new ForwardedHeadersOptions
+{
+    ForwardedHeaders = ForwardedHeaders.XForwardedFor | ForwardedHeaders.XForwardedProto
+});
+
 app.UseCors("frontend");
 
 // Global exception handler — converts domain exceptions to clean HTTP responses.
@@ -225,9 +236,10 @@ app.Use(async (context, next) =>
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }
-    catch (InvalidOperationException ex)
+    catch (DomainException ex)
     {
         // Доменные EnsureValid-проверки сообщают о невалидном запросе клиента.
+        // InvalidOperationException сюда НЕ мапится: это серверный баг (500), а не 400.
         context.Response.StatusCode = StatusCodes.Status400BadRequest;
         await context.Response.WriteAsJsonAsync(new { error = ex.Message });
     }

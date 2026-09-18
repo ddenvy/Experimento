@@ -316,7 +316,7 @@ public class ProvisionDemoDataHandler : IRequestHandler<ProvisionDemoDataCommand
             Title = "Aspirin Stability Review (demo)",
             SourceType = SourceType.Paper,
             Reference = "Demo Ref: J Pharm Sci, 2019, 108(5)",
-            Status = "Ready",
+            Status = KnowledgeStatus.Ready,
             UploadedBy = request.UserId
         };
         var kbDoc2 = new KnowledgeDocument
@@ -325,13 +325,33 @@ public class ProvisionDemoDataHandler : IRequestHandler<ProvisionDemoDataCommand
             Title = "Tablet Excipient Compatibility Guide (demo)",
             SourceType = SourceType.InternalExperiment,
             Reference = "Demo Ref: Internal R&D Note RD-2024-017",
-            Status = "Ready",
+            Status = KnowledgeStatus.Ready,
             UploadedBy = request.UserId
         };
         _db.KnowledgeDocuments.Add(kbDoc1);
         _db.KnowledgeDocuments.Add(kbDoc2);
 
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Двойной клик по онбордингу: уникальный индекс (CreatedBy, Name) не пропустил
+            // второй demo-проект. Возвращаем тот, что успела создать параллельная попытка.
+            var raced = await _db.Projects.AsNoTracking()
+                .Where(p => p.CreatedBy == request.UserId && p.Name == DemoProjectName)
+                .OrderByDescending(p => p.CreatedAtUtc)
+                .FirstOrDefaultAsync(ct);
+            if (raced is null)
+                throw;
+
+            var racedFormulation = await _db.Formulations.AsNoTracking()
+                .Where(f => f.ProjectId == raced.Id)
+                .Select(f => new { f.Id, Versions = f.Versions.Count })
+                .FirstOrDefaultAsync(ct);
+            return new DemoDataDto(raced.Id, racedFormulation?.Id ?? Guid.Empty, racedFormulation?.Versions ?? 0);
+        }
 
         return new DemoDataDto(project.Id, formulation.Id, 1);
     }

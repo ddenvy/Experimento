@@ -162,4 +162,15 @@ public class StabilityKineticsTests
         // Экстраполяция на 25 °C от 50 °C — это 25 °C вниз, дальше принятого предела.
         Assert.Equal(StabilityConfidence.Medium, assessment.Confidence);
     }
+
+    [Fact(DisplayName = "Reference temperature inside the studied range is interpolation, not extrapolation")]
+    public void ReferenceInsideRange_IsNotExtrapolation()
+    {
+        // Точки при 5 и 40 °C охватывают референсные 25 °C: перенос интерполяционный.
+        var assessment = StabilityKinetics.Assess(VersionId, FirstOrderData(0.0005, 80_000, 5, 40));
+
+        Assert.DoesNotContain(assessment.Warnings, w => w.Contains("extrapolated"));
+        Assert.Equal(StabilityConfidence.High, assessment.Confidence);
+        Assert.Equal(210.7, assessment.ShelfLifeDaysAt25C!.Value, 1);
+    }
 }

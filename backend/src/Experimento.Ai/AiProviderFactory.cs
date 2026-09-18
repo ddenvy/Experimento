@@ -90,6 +90,19 @@ public static class AiProviderFactory
                 break;
         }
 
+        // В Production выбранный провайдер без учётных данных — это ошибка конфигурации,
+        // а не повод молча упасть в offline-заглушки: семантический поиск просто перестанет
+        // работать, и узнают об этом постфактум. В Development допустим тихий fallback.
+        var isProduction = string.Equals(
+            Environment.GetEnvironmentVariable("ASPNETCORE_ENVIRONMENT"),
+            "Production", StringComparison.OrdinalIgnoreCase);
+        if (isProduction && provider != "none" && chatService is null && embeddingService is null)
+        {
+            throw new InvalidOperationException(
+                $"AI provider '{provider}' is selected but its credentials/endpoints are missing " +
+                "(например Ai:Gemini:ApiKey). Заполните конфигурацию или явно задайте Ai:Provider=none.");
+        }
+
         services.AddSingleton(chatService ?? new FallbackChatCompletionService());
         services.AddSingleton<IEmbeddingService>(sp =>
             new EmbeddingService(embeddingService, provider, sp.GetService<Microsoft.Extensions.Logging.ILogger<EmbeddingService>>()));

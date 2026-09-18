@@ -78,7 +78,11 @@ public class PubChemCatalogService : IChemicalCatalogService
         AddRange(localTask.Result);
         AddRange(externalTask.Result);
 
-        _cache.Set(cacheKey, result, SuggestCacheTtl);
+        _cache.Set(cacheKey, result, new MemoryCacheEntryOptions
+        {
+            AbsoluteExpirationRelativeToNow = SuggestCacheTtl,
+            Size = 1
+        });
         return result;
     }
 
@@ -88,8 +92,10 @@ public class PubChemCatalogService : IChemicalCatalogService
         if (name.Length < 2) return null;
 
         // 1. Точное попадание в локальном каталоге (по каноническому имени, регистр игнорируем).
+        // LOWER(CanonicalName) поддержан функциональным индексом IX_ChemicalCatalog_Lower_CanonicalName.
+        var nameLower = name.ToLowerInvariant();
         var cachedByName = await _db.ChemicalCatalog
-            .FirstOrDefaultAsync(e => e.CanonicalName.ToLower() == name.ToLower(), cancellationToken);
+            .FirstOrDefaultAsync(e => e.CanonicalName.ToLower() == nameLower, cancellationToken);
         if (cachedByName is not null)
         {
             // Запись могла быть создана до появления структурных полей — дозаполним по CID.
@@ -128,7 +134,8 @@ public class PubChemCatalogService : IChemicalCatalogService
         if (cids.Count == 0) return Array.Empty<ChemicalDto>();
         return await _db.ChemicalCatalog
             .Where(e => cids.Contains(e.PubChemCid))
-            .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles))
+            .Select(e => new ChemicalDto(e.PubChemCid, e.CanonicalName,
+                e.CasNumber == "" ? null : e.CasNumber, e.Formula, e.MolarMass, e.Smiles))
             .ToListAsync(cancellationToken);
     }
 
@@ -334,7 +341,9 @@ public class PubChemCatalogService : IChemicalCatalogService
             if (existing.MolarMass == 0 && molarMass > 0) { existing.MolarMass = molarMass; changed = true; }
             if (existing.CasNumber is null)
             {
-                try { existing.CasNumber = await FetchPrimaryCasAsync(cid, ct); changed = true; }
+                // Пустая строка — «запросили, CAS нет»: null означает «ещё не пытались»,
+                // иначе внешний запрос synonyms дёргался бы при каждом резолве.
+                try { existing.CasNumber = await FetchPrimaryCasAsync(cid, ct) ?? string.Empty; changed = true; }
                 catch (Exception ex) { _logger.LogWarning(ex, "Failed to fetch synonyms/CAS for CID {Cid}", cid); }
             }
             if (changed) await _db.SaveChangesAsync(ct);
@@ -356,7 +365,7 @@ public class PubChemCatalogService : IChemicalCatalogService
         {
             PubChemCid = cid,
             CanonicalName = title,
-            CasNumber = cas,
+            CasNumber = cas ?? string.Empty,
             Formula = formula,
             Smiles = smiles,
             MolarMass = molarMass
@@ -448,5 +457,6 @@ public class PubChemCatalogService : IChemicalCatalogService
     }
 
     private static ChemicalDto ToDto(ChemicalCatalogEntry e) =>
-        new(e.PubChemCid, e.CanonicalName, e.CasNumber, e.Formula, e.MolarMass, e.Smiles);
+        new(e.PubChemCid, e.CanonicalName, string.IsNullOrEmpty(e.CasNumber) ? null : e.CasNumber,
+            e.Formula, e.MolarMass, e.Smiles);
 }

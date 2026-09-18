@@ -45,20 +45,35 @@ public class AuditTrailRepository : IAuditTrail
 
     public async Task<long?> VerifyChainAsync(CancellationToken cancellationToken = default)
     {
-        var entries = await _db.AuditEntries
-            .OrderBy(e => e.Id)
-            .ToListAsync(cancellationToken);
-
+        // Весь журнал в память не грузим — идём батчами по Id (keyset pagination).
+        const int batchSize = 1000;
+        long lastId = 0;
         string previousHash = string.Empty;
-        foreach (var entry in entries)
+
+        while (true)
         {
-            if (entry.PreviousHash != previousHash)
-                return entry.Id;
-            if (!entry.IsHashValid())
-                return entry.Id;
-            previousHash = entry.EntryHash;
+            var batch = await _db.AuditEntries
+                .AsNoTracking()
+                .Where(e => e.Id > lastId)
+                .OrderBy(e => e.Id)
+                .Take(batchSize)
+                .ToListAsync(cancellationToken);
+            if (batch.Count == 0)
+                return null;
+
+            foreach (var entry in batch)
+            {
+                if (entry.PreviousHash != previousHash)
+                    return entry.Id;
+                if (!entry.IsHashValid())
+                    return entry.Id;
+                previousHash = entry.EntryHash;
+            }
+
+            lastId = batch[^1].Id;
+            if (batch.Count < batchSize)
+                return null;
         }
-        return null;
     }
 
     public async Task<IReadOnlyList<AuditEntry>> GetTrailAsync(string? entityType, string? entityId,

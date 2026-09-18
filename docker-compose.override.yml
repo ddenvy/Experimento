@@ -1,0 +1,20 @@
+# Локальные настройки разработки и e2e.
+# docker compose автоматически подхватывает этот файл рядом с docker-compose.yml.
+# Продакшн-деплой должен ссылаться только на docker-compose.yml явным списком
+# (например docker compose -f docker-compose.yml up -d), чтобы эти послабления
+# в продакшн не попали.
+services:
+  backend:
+    environment:
+      # Локально и в Playwright работаем в Development: dev-обработка ошибок, Scalar,
+      # допустим AI-провайдер без ключа (тихий offline-режим вместо fail-fast).
+      ASPNETCORE_ENVIRONMENT: Development
+      # Тестовый админ apple@apple.com / Test12345! — только для локали и Playwright.
+      Seed__TestAdmin: "true"
+      # E2E делает много последовательных логинов с одного IP; прод-дефолт 20/мин.
+      RateLimits__AuthPermitPerMinute: "200"
+      # E2E-прогон идёт одним пользователем и всплесками страниц выедает ведро; прод-дефолт 300/100.
+      RateLimits__ApiTokenLimit: "5000"
+      RateLimits__ApiTokensPerPeriod: "2000"
+      # Gemini используется, если ключ задан в .env; без ключа система уходит в offline-эвристики.
+      Ai__Provider: gemini

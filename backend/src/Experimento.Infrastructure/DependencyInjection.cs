@@ -18,8 +18,15 @@ public static class DependencyInjection
         // Data
         var connectionString = config.GetConnectionString("Default")
             ?? "Host=localhost;Port=5432;Database=experimento;Username=experimento;Password=experimento";
-        services.AddDbContext<AppDbContext>(options =>
-            options.UseNpgsql(connectionString, o => o.UseVector()));
+        // Фабрика нужна консьюмерам: при падении SaveChanges основной контекст может быть
+        // неработоспособен, а пометить job Failed всё равно нужно — для этого создаётся свежий.
+        // Фабрика и scoped-контекст обязаны использовать одну регистрацию опций (singleton),
+        // иначе валидатор DI ловит "scoped options из singleton factory".
+        void ConfigureOptions(DbContextOptionsBuilder options) =>
+            options.UseNpgsql(connectionString, o => o.UseVector());
+        services.AddDbContextFactory<AppDbContext>(ConfigureOptions);
+        services.AddDbContext<AppDbContext>(ConfigureOptions,
+            ServiceLifetime.Scoped, ServiceLifetime.Singleton);
         services.AddScoped<IAppDbContext>(sp => sp.GetRequiredService<AppDbContext>());
 
         // Audit
@@ -40,7 +47,8 @@ public static class DependencyInjection
         services.AddSingleton<IDocumentTextExtractor, Knowledge.Extraction.DocumentTextExtractor>();
 
         // Chemical catalog (PubChem): in-memory cache for suggestions, DB cache for resolved substances.
-        services.AddMemoryCache();
+        // Лимит обязательный: без него кэш автоподсказок PubChem рос бы по числу уникальных запросов.
+        services.AddMemoryCache(o => o.SizeLimit = 5_000);
         services.AddHttpClient("pubchem", client =>
         {
             client.BaseAddress = new Uri("https://pubchem.ncbi.nlm.nih.gov");

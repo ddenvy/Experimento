@@ -49,14 +49,9 @@ services:
       Jwt__Issuer: Experimento
       Jwt__Audience: Experimento
       Cors__Origins__0: ${FRONTEND_ORIGIN:-http://localhost:3000}
-      # Локальный compose используется для разработки/e2e — сеем тестового админа.
-      Seed__TestAdmin: "true"
-      # E2E делает много последовательных логинов с одного IP; прод-дефолт 20/мин.
-      RateLimits__AuthPermitPerMinute: "200"
-      # E2E-прогон идёт одним пользователем и всплесками страниц выедает ведро; прод-дефолт 300/100.
-      RateLimits__ApiTokenLimit: "5000"
-      RateLimits__ApiTokensPerPeriod: "2000"
-      Ai__Provider: gemini
+      # По умолчанию AI выключен (эвристики работают и без него). Для включения в проде
+      # задайте AI_PROVIDER=gemini и GEMINI_API_KEY в .env — без ключа приложение не стартует.
+      Ai__Provider: ${AI_PROVIDER:-none}
       Ai__Gemini__ApiKey: ${GEMINI_API_KEY:-}
       Ai__Gemini__ChatModel: gemini-3.5-flash-lite
     ports:

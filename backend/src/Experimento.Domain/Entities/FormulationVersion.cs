@@ -1,4 +1,5 @@
 using Experimento.Domain.Enums;
+using Experimento.Domain.Exceptions;
 
 namespace Experimento.Domain.Entities;
 
@@ -20,23 +21,23 @@ public class FormulationVersion
     public FormulationConditions Conditions { get; set; } = new();
 
     /// <summary>
-    /// Validates the version's components. Throws InvalidOperationException when rules are broken.
+    /// Validates the version's components. Throws DomainException when rules are broken.
     /// </summary>
     public void EnsureValid()
     {
         if (Components.Count == 0)
-            throw new InvalidOperationException("A formulation version must have at least one component.");
+            throw new DomainException("A formulation version must have at least one component.");
 
         foreach (var component in Components)
         {
             if (component.MolarMass <= 0)
-                throw new InvalidOperationException($"Molar mass of '{component.ChemicalName}' must be greater than zero.");
+                throw new DomainException($"Molar mass of '{component.ChemicalName}' must be greater than zero.");
             if (component.Proportion is < 0 or > 1)
-                throw new InvalidOperationException($"Proportion of '{component.ChemicalName}' must be in the [0, 1] range.");
+                throw new DomainException($"Proportion of '{component.ChemicalName}' must be in the [0, 1] range.");
         }
 
         var sum = Components.Sum(c => c.Proportion);
         if (sum < 0.999 || sum > 1.001)
-            throw new InvalidOperationException($"Sum of proportions ({sum}) must equal 1.0 (tolerance 0.001).");
+            throw new DomainException($"Sum of proportions ({sum}) must equal 1.0 (tolerance 0.001).");
     }
 }

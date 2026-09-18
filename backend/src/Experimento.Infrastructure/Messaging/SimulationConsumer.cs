@@ -3,7 +3,6 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Experimento.Infrastructure.Data;
 using Experimento.Infrastructure.Simulations;
-using System.Text.Json;
 
 namespace Experimento.Infrastructure.Messaging;
 
@@ -13,14 +12,16 @@ namespace Experimento.Infrastructure.Messaging;
 public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
 {
     private readonly AppDbContext _db;
+    private readonly IDbContextFactory<AppDbContext> _dbFactory;
     private readonly SimulationEngine _engine;
     private readonly IJobNotifier _notifier;
     private readonly ILogger<SimulationConsumer> _logger;
 
-    public SimulationConsumer(AppDbContext db, SimulationEngine engine, IJobNotifier notifier,
-        ILogger<SimulationConsumer> logger)
+    public SimulationConsumer(AppDbContext db, IDbContextFactory<AppDbContext> dbFactory,
+        SimulationEngine engine, IJobNotifier notifier, ILogger<SimulationConsumer> logger)
     {
         _db = db;
+        _dbFactory = dbFactory;
         _engine = engine;
         _notifier = notifier;
         _logger = logger;
@@ -55,6 +56,11 @@ public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
 
             var runResult = await _engine.RunAsync(jobId, snapshot, job.ConfigJson, context.CancellationToken);
 
+            // Результат, кандидаты и финальный статус — одной транзакцией. Раньше это были
+            // четыре отдельных SaveChanges, и сбой посередине оставлял result без bestCandidate
+            // и job в Running; повторная доставка при этом рано выходила по наличию result.
+            await using var tx = await _db.Database.BeginTransactionAsync(context.CancellationToken);
+
             var result = new SimulationResult
             {
                 JobId = jobId,
@@ -62,42 +68,60 @@ public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
                 IterationsExecuted = runResult.IterationsExecuted
             };
             _db.SimulationResults.Add(result);
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(context.CancellationToken);
 
             // Persist top 50 candidates
-            var top = runResult.RankedCandidates.Take(50).ToList();
-            foreach (var c in top)
+            var addedCandidates = new List<SimulationCandidate>();
+            foreach (var c in runResult.RankedCandidates.Take(50))
             {
-                _db.SimulationCandidates.Add(new SimulationCandidate
+                var entity = new SimulationCandidate
                 {
                     ResultId = result.Id,
                     ParametersJson = c.ParametersJson,
                     SuccessProbability = c.SuccessProbability,
                     Score = c.Score,
                     Rank = c.Rank
-                });
+                };
+                _db.SimulationCandidates.Add(entity);
+                addedCandidates.Add(entity);
             }
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(context.CancellationToken);
 
-            var bestEntity = await _db.SimulationCandidates
-                .FirstOrDefaultAsync(c => c.ResultId == result.Id && c.Rank == 1);
-            result.BestCandidateId = bestEntity?.Id;
-            await _db.SaveChangesAsync();
+            result.BestCandidateId = addedCandidates.FirstOrDefault(c => c.Rank == 1)?.Id;
 
             job.Status = JobStatus.Completed;
             job.Progress = 100;
             job.CompletedAtUtc = DateTime.UtcNow;
-            await _db.SaveChangesAsync();
+            await _db.SaveChangesAsync(context.CancellationToken);
+            await tx.CommitAsync(context.CancellationToken);
+
             await _notifier.PublishCompletedAsync("simulation", jobId);
         }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Simulation job {JobId} failed", jobId);
-            job.Status = JobStatus.Failed;
-            job.Error = ex.Message;
-            job.CompletedAtUtc = DateTime.UtcNow;
-            await _db.SaveChangesAsync();
+            await MarkJobFailedAsync(jobId, ex);
             await _notifier.PublishFaultedAsync("simulation", jobId, "Simulation failed. Please retry or contact support.");
+        }
+    }
+
+    /// <summary>Пометка Failed через отдельный контекст (см. PredictionConsumer.MarkJobFailedAsync).</summary>
+    private async Task MarkJobFailedAsync(Guid jobId, Exception ex)
+    {
+        try
+        {
+            await using var errorDb = await _dbFactory.CreateDbContextAsync();
+            await errorDb.SimulationJobs
+                .Where(j => j.Id == jobId && j.Status != JobStatus.Completed)
+                .ExecuteUpdateAsync(s => s
+                    .SetProperty(j => j.Status, JobStatus.Failed)
+                    .SetProperty(j => j.Error, ex.Message.Length > 4000 ? ex.Message[..4000] : ex.Message)
+                    .SetProperty(j => j.CompletedAtUtc, DateTime.UtcNow));
+        }
+        catch (Exception persistEx)
+        {
+            _logger.LogCritical(persistEx, "Failed to mark simulation job {JobId} as Failed", jobId);
+            throw;
         }
     }
 }

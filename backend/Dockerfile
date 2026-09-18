@@ -25,8 +25,9 @@ COPY --from=build --chown=appuser:appgroup /app/publish ./
 
 USER appuser
 
+# Окружение НЕ задаётся в образе: по умолчанию ASP.NET Core стартует как Production,
+# а Development (dev-ключ JWT, Scalar, тестовый админ) включается только явно при запуске.
 ENV ASPNETCORE_URLS=http://0.0.0.0:8080
-ENV ASPNETCORE_ENVIRONMENT=Development
 EXPOSE 8080
 
 ENTRYPOINT ["dotnet", "Experimento.WebApi.dll"]

@@ -18,7 +18,10 @@ public class ChunkingService
         for (int i = 0; i < content.Length; i += chunkSizeChars - overlapChars)
         {
             var len = Math.Min(chunkSizeChars, content.Length - i);
-            chunks.Add(content.Substring(i, len).Trim());
+            // Пустой кусок из одних пробелов на границе не должен уходить в эмбеддинг.
+            var chunk = content.Substring(i, len).Trim();
+            if (!string.IsNullOrEmpty(chunk))
+                chunks.Add(chunk);
             if (i + len >= content.Length) break;
         }
         return chunks;

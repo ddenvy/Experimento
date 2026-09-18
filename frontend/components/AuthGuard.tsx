@@ -1,11 +1,10 @@
 "use client";
 
-import { usePathname, useRouter } from "next/navigation";
+import { useRouter } from "next/navigation";
 import { useEffect, useState } from "react";
 import { refreshAccessToken } from "@/lib/api";
 
 export function AuthGuard({ children }: { children: React.ReactNode }) {
-  const pathname = usePathname();
   const router = useRouter();
   // Пока проверяем сессию через refresh-cookie, интерфейс не показываем.
   const [ready, setReady] = useState(false);
@@ -15,7 +14,10 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
 
     async function bootstrap(): Promise<void> {
       // Access-токен живёт в памяти и теряется при перезагрузке — восстанавливаем сессию
-      // через refresh-токен в httpOnly-cookie.
+      // через refresh-токен в httpOnly-cookie. Делаем это ОДИН раз при монтировании лейаута:
+      // refresh ротирует токен, а повторный вызов на каждый переход (две вкладки, быстрая
+      // навигация) предъявляет уже отозванный токен и вызывает отзыв всего семейства.
+      // Дальше истечение access-токена обрабатывает перехватчик 401 в lib/api.
       const authenticated = await refreshAccessToken();
       if (cancelled) return;
       if (!authenticated) {
@@ -29,7 +31,7 @@ export function AuthGuard({ children }: { children: React.ReactNode }) {
     return () => {
       cancelled = true;
     };
-  }, [pathname, router]);
+  }, [router]);
 
   if (!ready) {
     return (

@@ -35,8 +35,9 @@ public static class DbSeeder
         // в обычном продакшене учётная запись с известным паролем не появится.
         if (seedTestAdmin)
         {
-            var existing = await db.Users.FirstOrDefaultAsync(u => u.Email == TestAdminEmail);
-            if (existing is null)
+            // Создаём только отсутствующую учётку. Если email уже занят реальным пользователем —
+            // не трогаем его и тем более не повышаем роль до Admin.
+            if (!await db.Users.AnyAsync(u => u.Email == TestAdminEmail))
             {
                 db.Users.Add(new User
                 {
@@ -45,11 +46,6 @@ public static class DbSeeder
                     PasswordHash = BCrypt.Net.BCrypt.HashPassword(TestAdminPassword),
                     Role = Domain.Enums.UserRole.Admin
                 });
-                await db.SaveChangesAsync();
-            }
-            else if (existing.Role != Domain.Enums.UserRole.Admin)
-            {
-                existing.Role = Domain.Enums.UserRole.Admin;
                 await db.SaveChangesAsync();
             }
         }

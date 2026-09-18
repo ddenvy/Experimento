@@ -52,7 +52,7 @@ public class UploadDocumentHandler : IRequestHandler<UploadDocumentCommand, Know
             SourceType = sourceType,
             Reference = request.Reference,
             UploadedBy = request.UploadedBy,
-            Status = "Pending"
+            Status = KnowledgeStatus.Pending
         };
         _db.KnowledgeDocuments.Add(doc);
         await _db.SaveChangesAsync(ct);
@@ -61,7 +61,7 @@ public class UploadDocumentHandler : IRequestHandler<UploadDocumentCommand, Know
         // чтобы не вставлять временную строку с пустым вектором (vector(1536) NOT NULL).
         await _publish.Publish(new Messaging.IngestDocumentCommand(doc.Id, request.Content), ct);
 
-        return new KnowledgeDocumentDto(doc.Id, doc.Title, doc.SourceType.ToString(), doc.Reference, doc.Status, doc.UploadedAtUtc);
+        return new KnowledgeDocumentDto(doc.Id, doc.Title, doc.SourceType.ToString(), doc.Reference, doc.Status.ToString(), doc.UploadedAtUtc);
     }
 }
 
@@ -92,7 +92,7 @@ public class ListDocumentsHandler : IRequestHandler<ListDocumentsQuery, IReadOnl
         }
 
         return await query.Select(d => new KnowledgeDocumentDto(d.Id, d.Title, d.SourceType.ToString(),
-            d.Reference, d.Status, d.UploadedAtUtc)).ToListAsync(ct);
+            d.Reference, d.Status.ToString(), d.UploadedAtUtc)).ToListAsync(ct);
     }
 }
 

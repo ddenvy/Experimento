@@ -138,6 +138,15 @@ public class AppDbContext : DbContext, IAppDbContext
             b.HasIndex(p => p.StudyId);
         });
 
+        // Статус ингеста документа хранится текстом (значения читаются в БД и логах).
+        modelBuilder.Entity<KnowledgeDocument>(b =>
+            b.Property(d => d.Status).HasConversion<string>());
+
+        // У пользователя не может быть двух проектов с одинаковым именем — защита от
+        // дублей при двойном клике (онбординг демо, повторная отправка формы).
+        modelBuilder.Entity<Project>(b =>
+            b.HasIndex(p => new { p.CreatedBy, p.Name }).IsUnique());
+
         base.OnModelCreating(modelBuilder);
     }
 }

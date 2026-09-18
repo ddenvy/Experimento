@@ -102,8 +102,16 @@ public static class StabilityKinetics
                         $"Fitted activation energy {Num(activationEnergy.Value, "0.#")} kJ/mol is outside the typical " +
                         $"{Num(MinPlausibleActivationEnergy, "0")}–{Num(MaxPlausibleActivationEnergy, "0")} kJ/mol range; check the input data.");
 
-                // Расстояние переноса до температуры хранения: и вверх, и вниз от изученного диапазона.
-                extrapolation = Math.Abs(ReferenceTemperatureCelsius - measurable.Min(r => r.TemperatureCelsius));
+                // Расстояние переноса до температуры хранения за пределы изученного диапазона.
+                // Если 25 °C лежит ВНУТРИ диапазона — это интерполяция, расстояние равно 0
+                // (прежняя формула |ref - min| давала ложную экстраполяцию, напр. 20 °C для точек 5 и 40).
+                var minTemperature = measurable.Min(r => r.TemperatureCelsius);
+                var maxTemperature = measurable.Max(r => r.TemperatureCelsius);
+                extrapolation = ReferenceTemperatureCelsius < minTemperature
+                    ? minTemperature - ReferenceTemperatureCelsius
+                    : ReferenceTemperatureCelsius > maxTemperature
+                        ? ReferenceTemperatureCelsius - maxTemperature
+                        : 0.0;
                 if (extrapolation > MaxExtrapolationCelsius)
                     warnings.Add(
                         $"Shelf life is extrapolated {Num(extrapolation, "0.#")} °C from the studied range " +

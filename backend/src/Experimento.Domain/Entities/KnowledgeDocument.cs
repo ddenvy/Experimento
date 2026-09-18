@@ -13,7 +13,7 @@ public class KnowledgeDocument
     public string Title { get; set; } = string.Empty;
     public SourceType SourceType { get; set; }
     public string Reference { get; set; } = string.Empty;
-    public string Status { get; set; } = "Pending";
+    public KnowledgeStatus Status { get; set; } = KnowledgeStatus.Pending;
     public Guid UploadedBy { get; set; }
     public DateTime UploadedAtUtc { get; set; } = DateTime.UtcNow;
 

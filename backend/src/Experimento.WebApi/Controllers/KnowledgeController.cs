@@ -23,7 +23,9 @@ public class KnowledgeController : BaseController
     public async Task<IActionResult> Upload([FromBody] UploadDocumentCommand cmd)
     {
         var result = await Mediator.Send(cmd with { UploadedBy = UserId });
-        await AuditAsync("Knowledge.Upload", "KnowledgeDocument", result.Id.ToString(), cmd);
+        // В журнал нельзя класть сам Content (до 200 000 символов) — только метаданные.
+        await AuditAsync("Knowledge.Upload", "KnowledgeDocument", result.Id.ToString(),
+            new { cmd.Title, cmd.SourceType, cmd.Reference, cmd.ProjectId, contentLength = cmd.Content.Length });
         return Ok(result);
     }
 

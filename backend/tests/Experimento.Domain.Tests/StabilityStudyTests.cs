@@ -1,4 +1,5 @@
 using Experimento.Domain.Entities;
+using Experimento.Domain.Exceptions;
 
 namespace Experimento.Domain.Tests;
 
@@ -25,7 +26,7 @@ public class StabilityStudyTests
     [Fact]
     public void StudyWithoutPoints_Throws()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => Study().EnsureValid());
+        var exception = Assert.Throws<DomainException>(() => Study().EnsureValid());
 
         Assert.Contains("at least one measurement point", exception.Message);
     }
@@ -33,7 +34,7 @@ public class StabilityStudyTests
     [Fact]
     public void NegativeTime_Throws()
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => Study(Point(-1, 99)).EnsureValid());
+        var exception = Assert.Throws<DomainException>(() => Study(Point(-1, 99)).EnsureValid());
 
         Assert.Contains("must not be negative", exception.Message);
     }
@@ -45,7 +46,7 @@ public class StabilityStudyTests
     [InlineData(140)]
     public void AssayOutsideRange_Throws(double assay)
     {
-        var exception = Assert.Throws<InvalidOperationException>(() => Study(Point(30, assay)).EnsureValid());
+        var exception = Assert.Throws<DomainException>(() => Study(Point(30, assay)).EnsureValid());
 
         Assert.Contains("outside the (0, 100] range", exception.Message);
     }

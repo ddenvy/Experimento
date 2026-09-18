@@ -1,7 +1,27 @@
+using FluentValidation;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 
 namespace Experimento.Application.Features.Projects;
+
+public class CreateProjectValidator : AbstractValidator<CreateProjectCommand>
+{
+    public CreateProjectValidator()
+    {
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.Description).MaximumLength(2000);
+    }
+}
+
+public class UpdateProjectValidator : AbstractValidator<UpdateProjectCommand>
+{
+    public UpdateProjectValidator()
+    {
+        RuleFor(x => x.Id).NotEmpty();
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.Description).MaximumLength(2000);
+    }
+}
 
 public record CreateProjectCommand(string Name, string? Description, Guid CreatedBy) : IRequest<ProjectDto>;
 public record UpdateProjectCommand(Guid Id, string Name, string? Description, Guid UserId = default) : IRequest<ProjectDto>;
@@ -16,9 +36,23 @@ public class CreateProjectHandler : IRequestHandler<CreateProjectCommand, Projec
 
     public async Task<ProjectDto> Handle(CreateProjectCommand request, CancellationToken ct)
     {
+        // Детерминированный 409 вместо DbUpdateException (500) на уникальном индексе.
+        if (await _db.Projects.AnyAsync(p => p.CreatedBy == request.CreatedBy && p.Name == request.Name, ct))
+            throw new ConflictException("A project with this name already exists.");
+
         var project = new Project { Name = request.Name, Description = request.Description, CreatedBy = request.CreatedBy };
         _db.Projects.Add(project);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Гонка двух одновременных созданий: индекс всё равно не пропустил дубль.
+            if (await _db.Projects.AsNoTracking().AnyAsync(p => p.CreatedBy == request.CreatedBy && p.Name == request.Name, ct))
+                throw new ConflictException("A project with this name already exists.");
+            throw;
+        }
         return new ProjectDto(project.Id, project.Name, project.Description, project.CreatedAtUtc);
     }
 }
@@ -35,6 +69,9 @@ public class UpdateProjectHandler : IRequestHandler<UpdateProjectCommand, Projec
                       ?? throw new NotFoundException($"Project {request.Id} not found.");
         if (!await _auth.OwnsProjectAsync(request.Id, request.UserId, ct))
             throw new ForbiddenException();
+
+        if (await _db.Projects.AnyAsync(p => p.Id != request.Id && p.CreatedBy == request.UserId && p.Name == request.Name, ct))
+            throw new ConflictException("A project with this name already exists.");
 
         project.Name = request.Name;
         project.Description = request.Description;

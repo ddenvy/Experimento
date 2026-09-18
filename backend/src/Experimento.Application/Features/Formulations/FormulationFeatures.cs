@@ -26,10 +26,22 @@ public record VersionComparisonDto(
     FormulationVersionDto VersionA, FormulationVersionDto VersionB,
     IReadOnlyList<ComponentDiff> ComponentDiffs);
 
+public class CreateFormulationValidator : AbstractValidator<CreateFormulationCommand>
+{
+    public CreateFormulationValidator()
+    {
+        RuleFor(x => x.ProjectId).NotEmpty();
+        RuleFor(x => x.Name).NotEmpty().MaximumLength(200);
+        RuleFor(x => x.TargetPurpose).MaximumLength(2000);
+    }
+}
+
 public class CreateVersionValidator : AbstractValidator<CreateVersionCommand>
 {
     public CreateVersionValidator()
     {
+        RuleFor(x => x.FormulationId).NotEmpty();
+        RuleFor(x => x.Notes).MaximumLength(4000);
         RuleFor(x => x.Components).NotEmpty();
         RuleForEach(x => x.Components).ChildRules(c =>
         {
@@ -40,9 +52,23 @@ public class CreateVersionValidator : AbstractValidator<CreateVersionCommand>
             c.RuleFor(x => x.PubChemCid).NotNull().WithMessage("Component must be selected from the chemical catalog.");
             c.RuleFor(x => x.PubChemCid).GreaterThan(0).When(x => x.PubChemCid.HasValue);
         });
+        // Одно вещество не может входить в состав двумя строками: ломает сравнение версий
+        // и дублирует вклад в предсказание.
+        RuleFor(x => x.Components)
+            .Must(c => c.Select(x => x.PubChemCid).Distinct().Count() == c.Count)
+            .WithMessage("Components must not contain duplicate chemicals.");
         RuleFor(x => x.Components)
             .Must(c => Math.Abs(c.Sum(x => x.Proportion) - 1.0) <= 0.001)
             .WithMessage("Sum of proportions must equal 1.0 (tolerance 0.001).");
+
+        // Физические границы условий — широкие, но отсекают мусор и опечатки на порядки.
+        RuleFor(x => x.Conditions.TemperatureCelsius).InclusiveBetween(-100, 500);
+        RuleFor(x => x.Conditions.PressureKPa).InclusiveBetween(0, 1_000_000)
+            .When(x => x.Conditions.PressureKPa.HasValue);
+        RuleFor(x => x.Conditions.PhTarget).InclusiveBetween(0, 14)
+            .When(x => x.Conditions.PhTarget.HasValue);
+        RuleFor(x => x.Conditions.Solvent).MaximumLength(300);
+        RuleFor(x => x.Conditions.DeliveryTarget).MaximumLength(300);
     }
 }
 
@@ -134,7 +160,17 @@ public class CreateVersionHandler : IRequestHandler<CreateVersionCommand, Formul
 
         formulation.CurrentVersionNumber = versionNumber;
         _db.FormulationVersions.Add(version);
-        await _db.SaveChangesAsync(ct);
+        try
+        {
+            await _db.SaveChangesAsync(ct);
+        }
+        catch (DbUpdateException)
+        {
+            // Параллельное создание версий: уникальный индекс (FormulationId, VersionNumber)
+            // не пропустил одинаковый номер — клиент должен повторить запрос.
+            throw new ConflictException(
+                $"Version {versionNumber} was created concurrently for formulation {request.FormulationId}. Please retry.");
+        }
 
         return FormulationMappings.MapVersion(version);
     }
@@ -209,11 +245,13 @@ public class CompareVersionsHandler : IRequestHandler<CompareVersionsQuery, Vers
         if (!await _auth.OwnsFormulationAsync(request.FormulationId, request.UserId, ct))
             throw new ForbiddenException();
 
-        var a = await Load(request.VersionAId, ct);
-        var b = await Load(request.VersionBId, ct);
+        // Версии грузятся только внутри уже проверенной формуляции: иначе владелец одной
+        // формуляции мог бы подставить чужие VersionId и прочитать чужой состав (IDOR).
+        var a = await LoadAsync(request.FormulationId, request.VersionAId, ct);
+        var b = await LoadAsync(request.FormulationId, request.VersionBId, ct);
 
         var names = a.Components.Select(c => c.ChemicalName)
-            .Concat(b.Components.Select(c => c.ChemicalName)).Distinct().ToList();
+            .Concat(b.Components.Select(c => c.ChemicalName)).Distinct(StringComparer.Ordinal).ToList();
         var diffs = new List<ComponentDiff>();
         foreach (var name in names)
         {
@@ -222,17 +260,26 @@ public class CompareVersionsHandler : IRequestHandler<CompareVersionsQuery, Vers
             string change;
             if (ca == null) change = "Added";
             else if (cb == null) change = "Removed";
-            else change = "Modified";
+            else
+            {
+                // Полностью идентичный компонент — не изменение, в диффе ему делать нечего.
+                if (ca.Proportion == cb.Proportion && ca.MolarMass == cb.MolarMass)
+                    continue;
+                change = "Modified";
+            }
             diffs.Add(new ComponentDiff(name, change,
                 ca?.Proportion, cb?.Proportion, ca?.MolarMass, cb?.MolarMass));
         }
         return new VersionComparisonDto(FormulationMappings.MapVersion(a), FormulationMappings.MapVersion(b), diffs);
     }
 
-    private Task<FormulationVersion> Load(Guid id, CancellationToken ct) =>
-        _db.FormulationVersions.Include(v => v.Components)
-            .FirstOrDefaultAsync(v => v.Id == id, ct)
-            .ContinueWith(t => t.Result ?? throw new NotFoundException($"Version {id} not found."), ct);
+    private async Task<FormulationVersion> LoadAsync(Guid formulationId, Guid id, CancellationToken ct)
+    {
+        var version = await _db.FormulationVersions
+            .Include(v => v.Components)
+            .FirstOrDefaultAsync(v => v.Id == id && v.FormulationId == formulationId, ct);
+        return version ?? throw new NotFoundException($"Version {id} not found in formulation {formulationId}.");
+    }
 }
 
 internal static class FormulationMappings

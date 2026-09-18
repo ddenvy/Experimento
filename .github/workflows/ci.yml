@@ -59,12 +59,17 @@ jobs:
         run: dotnet restore
         working-directory: backend
 
+      - name: NuGet vulnerability audit
+        # Падает при уязвимостях (включая транзитивные) — гейт до сборки.
+        run: dotnet list Experimento.slnx package --vulnerable --include-transitive
+        working-directory: backend
+
       - name: Build
         run: dotnet build --no-restore --configuration Release
         working-directory: backend
 
       - name: Run tests (all test projects)
-        # Solution-файла нет, поэтому перечисляем тест-проекты явно.
+        # Перечисляем тест-проекты явно: интеграционные WebApi.Tests поднимаются на сервисах выше.
         working-directory: backend
         run: |
           for proj in tests/*/*.Tests.csproj; do
@@ -87,6 +92,11 @@ jobs:
 
       - name: Install dependencies
         run: npm ci
+        working-directory: frontend
+
+      - name: npm audit (high and critical)
+        # Гейт по известным уязвимостям зависимостей; devDependencies тоже учитываются.
+        run: npm audit --audit-level=high
         working-directory: frontend
 
       - name: Typecheck

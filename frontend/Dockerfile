@@ -11,7 +11,7 @@ ENV NEXT_PUBLIC_API_URL=$NEXT_PUBLIC_API_URL
 COPY package.json package-lock.json* ./
 RUN npm ci
 
-# Build the Next.js app
+# Build the Next.js app (output: "standalone" produces a self-contained minimal server)
 COPY . .
 RUN npm run build
 
@@ -21,14 +21,17 @@ WORKDIR /app
 
 ENV NODE_ENV=production
 ENV NEXT_TELEMETRY_DISABLED=1
+ENV HOSTNAME=0.0.0.0
+ENV PORT=3000
 
 RUN addgroup --system appgroup && adduser --system --ingroup appgroup appuser
 
-COPY --from=build /app/package.json ./
-COPY --from=build /app/node_modules ./node_modules
-COPY --from=build /app/.next ./.next
+# Берём только standalone-рантайм: без devDependencies и полного node_modules
+# (раньше сюда копировался весь node_modules из build-стадии).
+COPY --from=build --chown=appuser:appgroup /app/.next/standalone ./
+COPY --from=build --chown=appuser:appgroup /app/.next/static ./.next/static
 
 USER appuser
 
 EXPOSE 3000
-CMD ["npm", "start"]
+CMD ["node", "server.js"]

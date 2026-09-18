@@ -1,4 +1,5 @@
 using Experimento.Domain.Entities;
+using Experimento.Domain.Exceptions;
 
 namespace Experimento.Domain.Tests;
 
@@ -49,7 +50,7 @@ public class FormulationVersionTests
     public void EnsureValid_ThrowsWhenNoComponents()
     {
         var v = new FormulationVersion();
-        Assert.Throws<InvalidOperationException>(() => v.EnsureValid());
+        Assert.Throws<DomainException>(() => v.EnsureValid());
     }
 
     [Fact]
@@ -58,7 +59,7 @@ public class FormulationVersionTests
         var v = new FormulationVersion();
         v.Components.Add(new FormulationComponent { ChemicalName = "A", MolarMass = 100, Proportion = 0.3 });
         v.Components.Add(new FormulationComponent { ChemicalName = "B", MolarMass = 100, Proportion = 0.3 });
-        Assert.Throws<InvalidOperationException>(() => v.EnsureValid());
+        Assert.Throws<DomainException>(() => v.EnsureValid());
     }
 
     [Fact]
@@ -66,7 +67,7 @@ public class FormulationVersionTests
     {
         var v = new FormulationVersion();
         v.Components.Add(new FormulationComponent { ChemicalName = "A", MolarMass = 0, Proportion = 1.0 });
-        Assert.Throws<InvalidOperationException>(() => v.EnsureValid());
+        Assert.Throws<DomainException>(() => v.EnsureValid());
     }
 
     [Fact]

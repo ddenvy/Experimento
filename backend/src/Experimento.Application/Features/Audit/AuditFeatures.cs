@@ -12,7 +12,10 @@ public class GetAuditTrailHandler : IRequestHandler<GetAuditTrailQuery, IReadOnl
 
     public async Task<IReadOnlyList<AuditEntryDto>> Handle(GetAuditTrailQuery request, CancellationToken ct)
     {
-        var entries = await _audit.GetTrailAsync(request.EntityType, request.EntityId, request.Skip, request.Take, ct);
+        // Жёсткие границы: один запрос не должен вытаскивать неограниченный объём журнала.
+        var skip = Math.Max(0, request.Skip);
+        var take = Math.Clamp(request.Take <= 0 ? 50 : request.Take, 1, 200);
+        var entries = await _audit.GetTrailAsync(request.EntityType, request.EntityId, skip, take, ct);
         return entries.Select(e => new AuditEntryDto(e.Id, e.TimestampUtc, e.ActorUserId, e.Action, e.EntityType, e.EntityId)).ToList();
     }
 }

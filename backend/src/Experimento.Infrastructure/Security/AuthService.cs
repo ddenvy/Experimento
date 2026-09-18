@@ -18,8 +18,16 @@ public class AuthService : IAuthService
     private readonly IConfiguration _config;
     public AuthService(AppDbContext db, IConfiguration config) => (_db, _config) = (db, config);
 
+    // Заранее посчитанный хеш для ветки «пользователь не найден»: без него время ответа
+    // на неверный email заметно меньше, чем на неверный пароль (user enumeration).
+    private static readonly string DummyPasswordHash = BCrypt.Net.BCrypt.HashPassword("timing-equalization-dummy");
+
+    /// <summary>Email нормализуется перед любым запросом: в БД колонка регистрозависимая.</summary>
+    private static string NormalizeEmail(string email) => email.Trim().ToLowerInvariant();
+
     public async Task<(User User, string AccessToken, string RefreshToken)> RegisterAsync(string email, string password, string displayName, CancellationToken ct = default)
     {
+        email = NormalizeEmail(email);
         if (await _db.Users.AnyAsync(u => u.Email == email, ct))
             throw new ConflictException("User with this email already exists.");
 
@@ -38,8 +46,14 @@ public class AuthService : IAuthService
 
     public async Task<(User User, string AccessToken, string RefreshToken)> LoginAsync(string email, string password, CancellationToken ct = default)
     {
-        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email, ct)
-                   ?? throw new UnauthorizedAccessException("Invalid credentials.");
+        email = NormalizeEmail(email);
+        var user = await _db.Users.FirstOrDefaultAsync(u => u.Email == email, ct);
+        if (user is null)
+        {
+            // Всё равно считаем BCrypt против заготовленного хеша — выравниваем время ответа.
+            BCrypt.Net.BCrypt.Verify(password, DummyPasswordHash);
+            throw new UnauthorizedAccessException("Invalid credentials.");
+        }
         if (!BCrypt.Net.BCrypt.Verify(password, user.PasswordHash))
             throw new UnauthorizedAccessException("Invalid credentials.");
 
@@ -64,7 +78,19 @@ public class AuthService : IAuthService
             throw new UnauthorizedAccessException("Refresh token expired or revoked.");
         }
 
-        token.RevokedAtUtc = DateTime.UtcNow;
+        // Атомарно «забираем» токен одним условным UPDATE: при двух параллельных refresh
+        // с одним токеном победит только один. Без этого оба запроса читают IsActive=true
+        // и ротируют один и тот же токен, оставляя осиротевшее семейство.
+        var affected = await _db.RefreshTokens
+            .Where(t => t.Id == token.Id && t.RevokedAtUtc == null)
+            .ExecuteUpdateAsync(s => s.SetProperty(t => t.RevokedAtUtc, DateTime.UtcNow), ct);
+        if (affected == 0)
+        {
+            // Проиграли гонку — второй предъявитель того же токена рассматривается как reuse.
+            await RevokeAllUserTokensAsync(token.UserId, ct);
+            throw new UnauthorizedAccessException("Refresh token expired or revoked.");
+        }
+
         var (access, newRefresh) = await IssueTokensAsync(token.User, ct);
         return (access, newRefresh);
     }
