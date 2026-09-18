@@ -49,6 +49,9 @@ public static class DependencyInjection
         services.AddScoped<IChemicalCatalogService, PubChemCatalogService>();
         services.AddScoped<ISubstituteFinder, SubstituteFinder>();
 
+        // Scale-up: правила без состояния и без обращений к БД.
+        services.AddSingleton<IScaleUpAssessment, ScaleUp.ScaleUpAssessor>();
+
         // MassTransit + RabbitMQ
         var rabbitHost = config["RabbitMq:Host"] ?? "localhost";
         var rabbitUser = config["RabbitMq:Username"] ?? "experimento";

@@ -131,6 +131,11 @@ builder.Services.AddRateLimiter(options =>
     // Лимит auth-эндпоинтов конфигурируем (тестовое окружение делает много логинов подряд).
     var authPermitLimit = builder.Configuration.GetValue("RateLimits:AuthPermitPerMinute", 20);
 
+    // Ёмкость и пополнение общего лимита тоже конфигурируемы: e2e-прогон одним пользователем
+    // выедает ведро целиком, хотя средняя нагрузка остаётся низкой.
+    var apiTokenLimit = builder.Configuration.GetValue("RateLimits:ApiTokenLimit", 300);
+    var apiTokensPerPeriod = builder.Configuration.GetValue("RateLimits:ApiTokensPerPeriod", 100);
+
     options.GlobalLimiter = PartitionedRateLimiter.Create<HttpContext, string>(httpContext =>
     {
         var path = httpContext.Request.Path;
@@ -156,8 +161,8 @@ builder.Services.AddRateLimiter(options =>
                 partitionKey,
                 _ => new TokenBucketRateLimiterOptions
                 {
-                    TokenLimit = 300,
-                    TokensPerPeriod = 100,
+                    TokenLimit = apiTokenLimit,
+                    TokensPerPeriod = apiTokensPerPeriod,
                     ReplenishmentPeriod = TimeSpan.FromSeconds(10),
                     QueueLimit = 0
                 });

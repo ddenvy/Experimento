@@ -158,6 +158,28 @@ export interface FormulationVersionDto {
   conditions: ConditionsDto;
 }
 
+// Серьёзность фактора риска при масштабировании; приходит строкой, не числом.
+export type ScaleUpSeverity = "Low" | "Medium" | "High" | "Critical";
+
+export interface ScaleUpFindingDto {
+  factor: string;
+  severity: ScaleUpSeverity;
+  observation: string;
+  recommendation: string;
+}
+
+// Оценка готовности версии к переносу на целевой объём партии.
+export interface ScaleUpAssessmentDto {
+  versionId: string;
+  versionNumber: number;
+  labReferenceVolumeLitres: number;
+  targetVolumeLitres: number;
+  scaleFactor: number;
+  readinessScore: number;
+  verdict: string;
+  findings: ScaleUpFindingDto[];
+}
+
 export interface JobDto {
   id: string;
   versionId: string;
@@ -520,6 +542,10 @@ export const api = {
       method: "POST",
       body: JSON.stringify(data),
     }),
+  getScaleUpAssessment: (versionId: string, targetVolumeLitres: number) =>
+    request<ScaleUpAssessmentDto>(
+      `/formulations/versions/${versionId}/scale-up?targetVolumeLitres=${targetVolumeLitres}`
+    ),
 
   // Predictions
   submitPrediction: (versionId: string) =>

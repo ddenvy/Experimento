@@ -567,6 +567,61 @@ test.describe("Authenticated workflow", () => {
     await expect(panel).toContainText("% match");
   });
 
+  test("scale-up tab assesses a version for a pilot batch size", async ({ page, request }) => {
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Scale-up ${marker}`, description: "scale-up e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Scale-up Form ${marker}`, targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+
+    const versionResp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, pressureKPa: 101.3, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      }
+    );
+    expect(versionResp.ok()).toBeTruthy();
+
+    await page.goto(`/projects/${project.id}/formulations/${formulation.id}?tab=scaleup`);
+    await page.getByTestId("assess-scale-up").click();
+
+    const result = page.getByTestId("scale-up-result");
+    await expect(result).toBeVisible();
+    // 10 л — уже пилотный масштаб: инертная рецептура теряет теплоотвод, но переносима.
+    await expect(page.getByTestId("scale-up-score")).toHaveText("92");
+    await expect(result).toContainText("Scalable with controls");
+    await expect(page.getByTestId("scale-up-findings")).toContainText("Thermal");
+    await expect(result).toContainText("cooling capacity per litre");
+  });
+
   test("knowledge base: upload a laboratory notebook scan, OCR it and find it semantically", async ({ page }) => {
     await page.goto("/knowledge");
     await expect(page.getByRole("heading", { name: "Knowledge Base" })).toBeVisible();

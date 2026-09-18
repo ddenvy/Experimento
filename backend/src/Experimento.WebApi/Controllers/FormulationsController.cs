@@ -46,4 +46,13 @@ public class FormulationsController : BaseController
     [HttpGet("{formulationId:guid}/compare")]
     public async Task<IActionResult> Compare(Guid formulationId, [FromQuery] Guid a, [FromQuery] Guid b)
         => Ok(await Mediator.Send(new CompareVersionsQuery(formulationId, a, b, UserId)));
+
+    /// <summary>
+    /// Оценка готовности версии к масштабированию на целевой объём партии: теплоотвод,
+    /// газовыделение, класс растворителя, pH и полнота данных. Скрининговый расчёт —
+    /// перенос подтверждается термической калориметрией и пилотной партией.
+    /// </summary>
+    [HttpGet("versions/{versionId:guid}/scale-up")]
+    public async Task<IActionResult> GetScaleUp(Guid versionId, [FromQuery] double targetVolumeLitres = 10)
+        => Ok(await Mediator.Send(new GetScaleUpAssessmentQuery(versionId, targetVolumeLitres, UserId)));
 }

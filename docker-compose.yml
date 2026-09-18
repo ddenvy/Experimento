@@ -53,6 +53,9 @@ services:
       Seed__TestAdmin: "true"
       # E2E делает много последовательных логинов с одного IP; прод-дефолт 20/мин.
       RateLimits__AuthPermitPerMinute: "200"
+      # E2E-прогон идёт одним пользователем и всплесками страниц выедает ведро; прод-дефолт 300/100.
+      RateLimits__ApiTokenLimit: "5000"
+      RateLimits__ApiTokensPerPeriod: "2000"
       Ai__Provider: gemini
       Ai__Gemini__ApiKey: ${GEMINI_API_KEY:-}
       Ai__Gemini__ChatModel: gemini-3.5-flash-lite
