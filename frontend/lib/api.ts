@@ -180,6 +180,35 @@ export interface ScaleUpAssessmentDto {
   findings: ScaleUpFindingDto[];
 }
 
+// Насколько рекомендация опирается на лабораторные данные, а не только на модель.
+export type NextExperimentConfidence = "Low" | "Medium" | "High";
+
+export interface SuggestedParameterDto {
+  name: string;
+  value: number;
+}
+
+// kind: "SimulationLead" | "RepeatSuccess" | "CloseLoop"
+export interface NextExperimentDto {
+  kind: string;
+  confidence: NextExperimentConfidence;
+  title: string;
+  rationale: string;
+  evidence: string[];
+  versionId: string | null;
+  versionNumber: number | null;
+  predictedSuccessProbability: number | null;
+  suggestedParameters: SuggestedParameterDto[];
+}
+
+export interface NextExperimentPlanDto {
+  formulationId: string;
+  versionsTotal: number;
+  outcomesRecorded: number;
+  meanCalibrationError: number | null;
+  recommendations: NextExperimentDto[];
+}
+
 export interface JobDto {
   id: string;
   versionId: string;
@@ -546,6 +575,8 @@ export const api = {
     request<ScaleUpAssessmentDto>(
       `/formulations/versions/${versionId}/scale-up?targetVolumeLitres=${targetVolumeLitres}`
     ),
+  getNextExperiments: (formulationId: string, limit = 5) =>
+    request<NextExperimentPlanDto>(`/formulations/${formulationId}/next-experiments?limit=${limit}`),
 
   // Predictions
   submitPrediction: (versionId: string) =>

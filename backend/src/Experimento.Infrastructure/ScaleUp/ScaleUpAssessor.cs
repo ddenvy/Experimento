@@ -1,3 +1,4 @@
+using System.Globalization;
 using Experimento.Infrastructure.Predictions;
 
 namespace Experimento.Infrastructure.ScaleUp;
@@ -104,7 +105,7 @@ public class ScaleUpAssessor : IScaleUpAssessment
         if (energetic.Count > 0) drivers.Add($"heat-releasing structural alerts ({string.Join(", ", energetic)})");
         if (reactive.Count > 0) drivers.Add($"reactive groups ({string.Join(", ", reactive)})");
         if (conditions.TemperatureCelsius >= ElevatedTemperatureCelsius)
-            drivers.Add($"process temperature {conditions.TemperatureCelsius:F0} °C");
+            drivers.Add($"process temperature {Num(conditions.TemperatureCelsius, "F0")} °C");
         var driverText = drivers.Count > 0
             ? string.Join("; ", drivers)
             : "no exothermic structural alerts (heat removal still degrades with volume)";
@@ -120,7 +121,7 @@ public class ScaleUpAssessor : IScaleUpAssessment
 
         yield return new ScaleUpFindingDto("Thermal",
             severity,
-            $"At {scaleFactor:F1}× scale, cooling capacity per litre is {coolingPerLitre:P0} of bench level; {driverText}.",
+            $"At {Num(scaleFactor, "F1")}× scale, cooling capacity per litre is {Pct(coolingPerLitre)} of bench level; {driverText}.",
             recommendation);
     }
 
@@ -139,7 +140,7 @@ public class ScaleUpAssessor : IScaleUpAssessment
                 : ScaleUpSeverity.Low;
 
         var vessel = sealedVessel
-            ? $"sealed vessel at {conditions.PressureKPa:F0} kPa"
+            ? $"sealed vessel at {Num(conditions.PressureKPa!.Value, "F0")} kPa"
             : "vented vessel";
 
         yield return new ScaleUpFindingDto("Gas evolution",
@@ -170,7 +171,7 @@ public class ScaleUpAssessor : IScaleUpAssessment
 
         yield return new ScaleUpFindingDto("Solvent",
             severity,
-            $"{entry.Value.Name} (flash point {flashPoint:F0} °C) is below the process temperature of {conditions.TemperatureCelsius:F0} °C, so the headspace is flammable — and it grows with volume.",
+            $"{entry.Value.Name} (flash point {Num(flashPoint, "F0")} °C) is below the process temperature of {Num(conditions.TemperatureCelsius, "F0")} °C, so the headspace is flammable — and it grows with volume.",
             "Blanket the vessel with inert gas and confirm the vessel and area classification for this solvent class.");
     }
 
@@ -190,7 +191,7 @@ public class ScaleUpAssessor : IScaleUpAssessment
 
         yield return new ScaleUpFindingDto("pH",
             severity,
-            $"Process is {kind} (pH {ph:F1}): the mass is corrosive to common vessel materials and neutralisation releases heat.",
+            $"Process is {kind} (pH {Num(ph, "F1")}): the mass is corrosive to common vessel materials and neutralisation releases heat.",
             "Confirm vessel material compatibility and dose the neutralising agent at a controlled rate.");
     }
 
@@ -262,6 +263,16 @@ public class ScaleUpAssessor : IScaleUpAssessment
         >= 50 => "Bench validation required",
         _ => "Not ready for scale-up",
     };
+
+    /// <summary>
+    /// Числа в тексте замечаний не должны зависеть от культуры хоста: интерфейс англоязычный,
+    /// а сами замечания попадают в отчёт и в тесты.
+    /// </summary>
+    private static string Num(double value, string format)
+        => value.ToString(format, CultureInfo.InvariantCulture);
+
+    private static string Pct(double value)
+        => value.ToString("P0", CultureInfo.InvariantCulture);
 
     private sealed record ComponentHazard(string Name, bool HasStructuralData, StructuralAnalysis Analysis);
 }

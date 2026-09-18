@@ -622,6 +622,85 @@ test.describe("Authenticated workflow", () => {
     await expect(result).toContainText("cooling capacity per litre");
   });
 
+  test("next experiment tab turns a simulation run into a ranked plan", async ({ page, request }) => {
+    test.setTimeout(90_000);
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Next ${marker}`, description: "next experiment e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Next Form ${marker}`, targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+
+    const version = await (
+      await request.post(`http://localhost:5126/api/formulations/${formulation.id}/versions`, {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      })
+    ).json();
+
+    // Прогоняем симуляцию через API и дожидаемся результата: он и есть источник рекомендаций.
+    const job = await (
+      await request.post(
+        `http://localhost:5126/api/simulations/formulation-versions/${version.id}/simulations`,
+        {
+          data: {
+            iterations: 10,
+            varyConcentrations: true,
+            varyTemperature: true,
+            varyPh: false,
+            seed: 7,
+            targetMetric: "success",
+          },
+          headers: authHeader,
+        }
+      )
+    ).json();
+    const jobUrl = `http://localhost:5126/api/simulations/simulation-jobs/${job.id}`;
+    let status = "";
+    for (let i = 0; i < 40 && status !== "Completed"; i++) {
+      status = (await (await request.get(jobUrl, { headers: authHeader })).json()).status;
+      if (status !== "Completed") await new Promise((resolve) => setTimeout(resolve, 1000));
+    }
+    expect(status).toBe("Completed");
+
+    await page.goto(`/projects/${project.id}/formulations/${formulation.id}?tab=nextexperiment`);
+
+    const item = page.getByTestId("next-experiment-item").first();
+    await expect(item).toBeVisible({ timeout: 15000 });
+    // Версия не проверена в лаборатории, поэтому лид симуляции — только гипотеза.
+    await expect(item).toContainText("Simulation lead");
+    await expect(item).toContainText("Low confidence");
+    await expect(item).toContainText("Run v1 with");
+    await expect(item).toContainText("no laboratory outcome recorded for this version");
+    await expect(page.getByText("Lab outcomes:")).toBeVisible();
+  });
+
   test("knowledge base: upload a laboratory notebook scan, OCR it and find it semantically", async ({ page }) => {
     await page.goto("/knowledge");
     await expect(page.getByRole("heading", { name: "Knowledge Base" })).toBeVisible();

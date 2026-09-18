@@ -12,6 +12,7 @@ import { SubstitutePanel } from "@/components/formulations/substitute-panel";
 import { PredictionsTab } from "@/components/predictions/predictions-tab";
 import { SimulationsTab } from "@/components/simulations/simulations-tab";
 import { ScaleUpTab } from "@/components/formulations/scale-up-tab";
+import { NextExperimentTab } from "@/components/formulations/next-experiment-tab";
 import { ReportTab } from "@/components/reports/report-tab";
 import { Plus, FlaskConical } from "lucide-react";
 import { cn } from "@/lib/utils";
@@ -21,6 +22,7 @@ const TABS = [
   { id: "predictions", label: "Predictions" },
   { id: "simulations", label: "Simulations" },
   { id: "scaleup", label: "Scale-up" },
+  { id: "nextexperiment", label: "Next experiment" },
   { id: "report", label: "Report" },
 ] as const;
 
@@ -80,11 +82,15 @@ function FormulationDetail() {
     router.replace(`?${qs.toString()}`, { scroll: false });
   }
 
-  function continueToSimulation(versionId: string) {
+  function openSection(next: TabId, versionId?: string) {
     const qs = new URLSearchParams(searchParams.toString());
-    qs.set("tab", "simulations");
-    qs.set("version", versionId);
+    qs.set("tab", next);
+    if (versionId) qs.set("version", versionId);
     router.replace(`?${qs.toString()}`, { scroll: false });
+  }
+
+  function continueToSimulation(versionId: string) {
+    openSection("simulations", versionId);
   }
 
   if (loading) return <p className="text-sm text-muted-foreground">Loading…</p>;
@@ -111,7 +117,7 @@ function FormulationDetail() {
         <p className="mt-1 text-sm text-muted-foreground">{formulation.targetPurpose}</p>
       </div>
 
-      <div className="flex gap-1 border-b" role="tablist" aria-label="Formulation sections">
+      <div className="flex gap-1 overflow-x-auto border-b" role="tablist" aria-label="Formulation sections">
         {TABS.map((t) => (
           <button
             key={t.id}
@@ -120,7 +126,7 @@ function FormulationDetail() {
             aria-selected={tab === t.id}
             onClick={() => setTab(t.id)}
             className={cn(
-              "-mb-px border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
+              "-mb-px shrink-0 whitespace-nowrap border-b-2 px-4 py-2.5 text-sm font-medium transition-colors",
               tab === t.id
                 ? "border-primary text-foreground"
                 : "border-transparent text-muted-foreground hover:text-foreground"
@@ -232,6 +238,14 @@ function FormulationDetail() {
 
       {tab === "scaleup" && (
         <ScaleUpTab key="scaleup" versions={versions} initialVersionId={selectedVersionParam} />
+      )}
+
+      {tab === "nextexperiment" && (
+        <NextExperimentTab
+          key="nextexperiment"
+          formulationId={formulationId}
+          onOpen={(next, versionId) => openSection(next, versionId)}
+        />
       )}
 
       {tab === "report" && (

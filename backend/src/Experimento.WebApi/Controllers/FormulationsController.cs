@@ -55,4 +55,13 @@ public class FormulationsController : BaseController
     [HttpGet("versions/{versionId:guid}/scale-up")]
     public async Task<IActionResult> GetScaleUp(Guid versionId, [FromQuery] double targetVolumeLitres = 10)
         => Ok(await Mediator.Send(new GetScaleUpAssessmentQuery(versionId, targetVolumeLitres, UserId)));
+
+    /// <summary>
+    /// План следующих экспериментов по формуляции: лучшие непроверенные кандидаты симуляций,
+    /// воспроизведение удачной версии и напоминания записать лабораторный исход. Уверенность
+    /// рекомендации опирается на фактическую калибровку модели по внесённым исходам.
+    /// </summary>
+    [HttpGet("{formulationId:guid}/next-experiments")]
+    public async Task<IActionResult> GetNextExperiments(Guid formulationId, [FromQuery] int limit = 5)
+        => Ok(await Mediator.Send(new GetNextExperimentsQuery(formulationId, limit, UserId)));
 }
