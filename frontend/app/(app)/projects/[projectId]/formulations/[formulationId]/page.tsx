@@ -8,6 +8,7 @@ import { Card, CardContent } from "@/components/ui/card";
 import { Breadcrumbs, type Crumb } from "@/components/layout/breadcrumbs";
 import { VersionComposer } from "@/components/formulations/version-composer";
 import { VersionCompare } from "@/components/formulations/version-compare";
+import { SubstitutePanel } from "@/components/formulations/substitute-panel";
 import { PredictionsTab } from "@/components/predictions/predictions-tab";
 import { SimulationsTab } from "@/components/simulations/simulations-tab";
 import { ReportTab } from "@/components/reports/report-tab";
@@ -38,6 +39,10 @@ function FormulationDetail() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showComposer, setShowComposer] = useState(false);
+  // Компонент, для которого открыта панель подбора замен.
+  const [substituteTarget, setSubstituteTarget] = useState<
+    { versionId: string; cid: number; name: string } | null
+  >(null);
 
   // Загрузка сущностей — подписка на внешнюю систему (API): все setState
   // выполняются только после await, флаг отмены защищает от гонки при смене маршрута.
@@ -162,11 +167,41 @@ function FormulationDetail() {
                       <span className="font-medium">v{v.versionNumber}</span>
                       <span className="text-xs text-muted-foreground">{v.status}</span>
                     </div>
-                    <p className="text-xs text-muted-foreground">
-                      {v.components
-                        .map((c) => `${c.chemicalName}${c.formula ? ` ${c.formula}` : ""} (${c.proportion})`)
-                        .join(", ")}
-                    </p>
+                    <ul className="space-y-1">
+                      {v.components.map((c) => {
+                        const cid = c.pubChemCid;
+                        return (
+                          <li key={c.id} className="flex items-center justify-between gap-2 text-xs">
+                            <span className="text-muted-foreground">
+                              {c.chemicalName}
+                              {c.formula ? ` ${c.formula}` : ""} ({c.proportion})
+                            </span>
+                            {cid !== null && (
+                              <button
+                                type="button"
+                                className="shrink-0 text-primary hover:underline"
+                                onClick={() =>
+                                  setSubstituteTarget((prev) =>
+                                    prev?.versionId === v.id && prev.cid === cid
+                                      ? null
+                                      : { versionId: v.id, cid, name: c.chemicalName }
+                                  )
+                                }
+                              >
+                                Find substitute
+                              </button>
+                            )}
+                          </li>
+                        );
+                      })}
+                    </ul>
+                    {substituteTarget?.versionId === v.id && (
+                      <SubstitutePanel
+                        cid={substituteTarget.cid}
+                        componentName={substituteTarget.name}
+                        onClose={() => setSubstituteTarget(null)}
+                      />
+                    )}
                     <p className="text-xs text-muted-foreground">
                       {v.conditions.temperatureCelsius}°C · pH {v.conditions.phTarget ?? "—"} ·{" "}
                       {v.conditions.solvent ?? "—"}

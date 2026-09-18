@@ -47,6 +47,7 @@ public static class DependencyInjection
             client.Timeout = TimeSpan.FromSeconds(10);
         });
         services.AddScoped<IChemicalCatalogService, PubChemCatalogService>();
+        services.AddScoped<ISubstituteFinder, SubstituteFinder>();
 
         // MassTransit + RabbitMQ
         var rabbitHost = config["RabbitMq:Host"] ?? "localhost";

@@ -502,6 +502,70 @@ test.describe("Authenticated workflow", () => {
     expect(actual).toBe(expected);
   });
 
+  test("composition tab suggests substitute components from the catalog", async ({ page, request }) => {
+    const authHeader = { Authorization: `Bearer ${token}` };
+    const marker = Date.now();
+    const project = await (
+      await request.post("http://localhost:5126/api/projects", {
+        data: { name: `Substitute ${marker}`, description: "substitute e2e" },
+        headers: authHeader,
+      })
+    ).json();
+    const formulation = await (
+      await request.post("http://localhost:5126/api/formulations", {
+        data: { projectId: project.id, name: `Substitute Form ${marker}`, targetPurpose: "test" },
+        headers: authHeader,
+      })
+    ).json();
+
+    const aspirin = await (
+      await request.get("http://localhost:5126/api/chemicals/resolve?name=aspirin", {
+        headers: authHeader,
+      })
+    ).json();
+    // Гарантируем близкий аналог в каталоге: салициловая кислота попадает
+    // в окно массы аспирина, поэтому кандидат найдётся даже на чистой базе.
+    await request.get("http://localhost:5126/api/chemicals/resolve?name=salicylic%20acid", {
+      headers: authHeader,
+    });
+
+    const versionResp = await request.post(
+      `http://localhost:5126/api/formulations/${formulation.id}/versions`,
+      {
+        data: {
+          components: [
+            {
+              pubChemCid: aspirin.pubChemCid,
+              chemicalName: aspirin.name,
+              casNumber: aspirin.casNumber,
+              formula: aspirin.formula,
+              molarMass: aspirin.molarMass,
+              proportion: 1.0,
+              role: "Active",
+            },
+          ],
+          conditions: { temperatureCelsius: 25, phTarget: 7, solvent: "water" },
+        },
+        headers: authHeader,
+      }
+    );
+    expect(versionResp.ok()).toBeTruthy();
+
+    await page.goto(
+      `/projects/${project.id}/formulations/${formulation.id}?tab=composition`
+    );
+    await page.getByRole("button", { name: "Find substitute" }).first().click();
+
+    const panel = page.getByTestId("substitute-panel");
+    await expect(panel).toBeVisible();
+    await expect(panel).toContainText("Substitutes for");
+
+    // Кандидаты приходят ранжированными и с расшифровкой совпадения.
+    await expect(page.getByTestId("substitute-list")).toBeVisible({ timeout: 15000 });
+    await expect(panel).toContainText("Salicylic");
+    await expect(panel).toContainText("% match");
+  });
+
   test("knowledge base: index a document and find it via semantic search", async ({ page }) => {
     await page.goto("/knowledge");
     await expect(page.getByRole("heading", { name: "Knowledge Base" })).toBeVisible();

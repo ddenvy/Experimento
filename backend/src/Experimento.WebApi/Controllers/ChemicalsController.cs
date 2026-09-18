@@ -14,8 +14,10 @@ namespace Experimento.WebApi.Controllers;
 public class ChemicalsController : ControllerBase
 {
     private readonly IChemicalCatalogService _catalog;
+    private readonly ISubstituteFinder _substitutes;
 
-    public ChemicalsController(IChemicalCatalogService catalog) => _catalog = catalog;
+    public ChemicalsController(IChemicalCatalogService catalog, ISubstituteFinder substitutes)
+        => (_catalog, _substitutes) = (catalog, substitutes);
 
     /// <summary>
     /// Автоподсказки для одного поля поиска: название/синоним, CAS-номер
@@ -80,5 +82,22 @@ public class ChemicalsController : ControllerBase
         if (cids is null || cids.Length == 0) return Ok(Array.Empty<object>());
         var result = await _catalog.GetRegulationsBatchAsync(cids, cancellationToken);
         return Ok(result);
+    }
+
+    /// <summary>
+    /// Подбор замен вещества из каталога: ближайшие по составу, массе и классу опасности
+    /// аналоги с указанием их регуляторного статуса. Помогает найти альтернативу при
+    /// перебоях поставок. Эквивалентность подтверждается экспериментом.
+    /// </summary>
+    [HttpGet("{cid:int}/substitutes")]
+    public async Task<IActionResult> GetSubstitutes(int cid, [FromQuery] int limit = 8,
+        CancellationToken cancellationToken = default)
+    {
+        if (limit is < 1 or > 25)
+            throw new BadRequestException("Limit must be between 1 and 25.");
+        var candidates = await _substitutes.FindAsync(cid, limit, cancellationToken);
+        if (candidates is null)
+            throw new NotFoundException($"Chemical with CID {cid} is not in the catalog.");
+        return Ok(candidates);
     }
 }

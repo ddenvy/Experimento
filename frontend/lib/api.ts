@@ -116,6 +116,20 @@ export interface ChemicalRegulationSummaryDto {
   regulations: ChemicalRegulationDto[];
 }
 
+// Кандидат на замену компонента: similarity — близость свойств,
+// matchScore — она же с поправкой на регуляторный статус (по нему сортировка).
+export interface SubstituteCandidateDto {
+  pubChemCid: number;
+  name: string;
+  casNumber: string | null;
+  formula: string | null;
+  molarMass: number;
+  similarity: number;
+  matchScore: number;
+  regulatoryStatus: RegulationStatus;
+  matchedSignals: string[];
+}
+
 // Кандидат автоподсказки: cid заполнен для каталога/CAS/формулы, null — для имени.
 export interface ChemicalSuggestion {
   pubChemCid: number | null;
@@ -482,6 +496,8 @@ export const api = {
       headers: { "Content-Type": "application/json" },
       body: JSON.stringify(cids),
     }),
+  findSubstitutes: (cid: number, limit = 8) =>
+    request<SubstituteCandidateDto[]>(`/chemicals/${cid}/substitutes?limit=${limit}`),
 
   // Formulations
   listProjects: () => request<ProjectDto[]>("/projects"),
