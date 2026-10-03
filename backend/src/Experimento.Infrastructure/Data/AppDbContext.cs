@@ -28,6 +28,7 @@ public class AppDbContext : DbContext, IAppDbContext
     public DbSet<KnowledgeDocument> KnowledgeDocuments => Set<KnowledgeDocument>();
     public DbSet<KnowledgeChunk> KnowledgeChunks => Set<KnowledgeChunk>();
     public DbSet<AuditEntry> AuditEntries => Set<AuditEntry>();
+    public DbSet<OutboxMessage> OutboxMessages => Set<OutboxMessage>();
     public DbSet<ChemicalCatalogEntry> ChemicalCatalog => Set<ChemicalCatalogEntry>();
     public DbSet<ChemicalRegulation> ChemicalRegulations => Set<ChemicalRegulation>();
     public DbSet<StabilityStudy> StabilityStudies => Set<StabilityStudy>();
@@ -65,6 +66,13 @@ public class AppDbContext : DbContext, IAppDbContext
             b.HasKey(e => e.Id);
             b.Property(e => e.Id).UseIdentityAlwaysColumn();
             b.HasIndex(e => new { e.EntityType, e.EntityId });
+            b.HasIndex(e => e.PreviousHash).IsUnique();
+        });
+
+        modelBuilder.Entity<OutboxMessage>(b =>
+        {
+            b.HasIndex(m => new { m.PublishedAtUtc, m.AvailableAtUtc, m.LeaseUntilUtc });
+            b.HasIndex(m => new { m.Kind, m.EntityId });
         });
 
         // Unique index on refresh token hash
@@ -89,13 +97,19 @@ public class AppDbContext : DbContext, IAppDbContext
 
         // Индексы под частые фильтры и навигации по внешним ключам (N+1/seq scan защита).
         modelBuilder.Entity<PredictionJob>(b =>
-            b.HasIndex(j => new { j.VersionId, j.RequestedBy }));
+        {
+            b.HasIndex(j => new { j.VersionId, j.RequestedBy });
+            b.HasIndex(j => new { j.Status, j.StartedAtUtc });
+        });
         modelBuilder.Entity<PredictionResult>(b =>
             b.HasIndex(r => r.JobId).IsUnique());
         modelBuilder.Entity<RationaleItem>(b =>
             b.HasIndex(r => r.ResultId));
         modelBuilder.Entity<SimulationJob>(b =>
-            b.HasIndex(j => new { j.VersionId, j.RequestedBy }));
+        {
+            b.HasIndex(j => new { j.VersionId, j.RequestedBy });
+            b.HasIndex(j => new { j.Status, j.StartedAtUtc });
+        });
         modelBuilder.Entity<SimulationResult>(b =>
             b.HasIndex(r => r.JobId).IsUnique());
         modelBuilder.Entity<SimulationCandidate>(b =>
@@ -140,7 +154,10 @@ public class AppDbContext : DbContext, IAppDbContext
 
         // Статус ингеста документа хранится текстом (значения читаются в БД и логах).
         modelBuilder.Entity<KnowledgeDocument>(b =>
-            b.Property(d => d.Status).HasConversion<string>());
+        {
+            b.Property(d => d.Status).HasConversion<string>();
+            b.HasIndex(d => new { d.Status, d.StartedAtUtc });
+        });
 
         // У пользователя не может быть двух проектов с одинаковым именем — защита от
         // дублей при двойном клике (онбординг демо, повторная отправка формы).

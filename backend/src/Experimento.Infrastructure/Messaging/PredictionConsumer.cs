@@ -2,11 +2,12 @@ using MassTransit;
 using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Experimento.Infrastructure.Data;
+using System.Text.Json;
 
 namespace Experimento.Infrastructure.Messaging;
 
 /// <summary>
-/// Consumes prediction jobs: runs the predictor, generates rationale, saves result.
+/// Обрабатывает прогноз: запускает модель, создает обоснование и сохраняет результат.
 /// </summary>
 public class PredictionConsumer : IConsumer<SubmitPredictionCommand>
 {
@@ -32,13 +33,18 @@ public class PredictionConsumer : IConsumer<SubmitPredictionCommand>
     public async Task Consume(ConsumeContext<SubmitPredictionCommand> context)
     {
         var jobId = context.Message.JobId;
-        var job = await _db.PredictionJobs.FindAsync([jobId]);
-        if (job is null || job.Status == JobStatus.Completed) return; // идемпотентность
+        // Только один консьюмер может перевести ожидающую задачу в Running.
+        var claimed = await _db.PredictionJobs
+            .Where(j => j.Id == jobId && j.Status == JobStatus.Pending)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, JobStatus.Running)
+                .SetProperty(j => j.StartedAtUtc, DateTime.UtcNow), context.CancellationToken);
+        if (claimed == 0) return;
+        var job = await _db.PredictionJobs.FindAsync([jobId], context.CancellationToken);
+        if (job is null) return;
 
         try
         {
-            job.Status = JobStatus.Running;
-            job.StartedAtUtc = DateTime.UtcNow;
             job.Stage = "Loading formulation";
             job.Progress = 10;
             await _db.SaveChangesAsync();
@@ -58,7 +64,7 @@ public class PredictionConsumer : IConsumer<SubmitPredictionCommand>
 
             var outcome = await _predictor.PredictAsync(snapshot, context.CancellationToken);
 
-            // Find model registration for the predictor
+            // Находим регистрацию используемой модели прогноза.
             var model = await _db.ModelRegistrations
                 .FirstOrDefaultAsync(m => m.Name == _predictor.ModelName && m.Version == _predictor.ModelVersion)
                 ?? throw new InvalidOperationException("Predictor model not registered.");
@@ -118,36 +124,58 @@ public class PredictionConsumer : IConsumer<SubmitPredictionCommand>
 
             await _notifier.PublishCompletedAsync("prediction", jobId);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Prediction job {JobId} failed", jobId);
-            await MarkJobFailedAsync(jobId, ex);
-            // Наружу — обобщённое сообщение; детали исключения не раскрываем клиенту.
-            await _notifier.PublishFaultedAsync("prediction", jobId, "Prediction failed. Please retry or contact support.");
+            if (await ScheduleRetryOrFailAsync(jobId, ex))
+                await _notifier.PublishFaultedAsync("prediction", jobId, "Prediction failed. Please retry or contact support.");
         }
     }
 
     /// <summary>
-    /// Помечает job как Failed через ОТДЕЛЬНЫЙ контекст: если упал сам SaveChanges,
-    /// исходный контекст может быть в нерабочем состоянии, и повторная запись в него
-    /// бросила бы второе исключение, оставив job в Running.
+    /// Через отдельный контекст атомарно назначает повтор или завершает задачу ошибкой.
     /// </summary>
-    private async Task MarkJobFailedAsync(Guid jobId, Exception ex)
+    private async Task<bool> ScheduleRetryOrFailAsync(Guid jobId, Exception ex)
     {
         try
         {
             await using var errorDb = await _dbFactory.CreateDbContextAsync();
-            await errorDb.PredictionJobs
-                .Where(j => j.Id == jobId && j.Status != JobStatus.Completed)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(j => j.Status, JobStatus.Failed)
-                    .SetProperty(j => j.Error, ex.Message.Length > 4000 ? ex.Message[..4000] : ex.Message)
-                    .SetProperty(j => j.CompletedAtUtc, DateTime.UtcNow));
+            await using var tx = await errorDb.Database.BeginTransactionAsync();
+            var job = await errorDb.PredictionJobs
+                .FromSqlInterpolated($@"SELECT * FROM ""PredictionJobs"" WHERE ""Id"" = {jobId} FOR UPDATE")
+                .ToListAsync();
+            var current = job.SingleOrDefault();
+            if (current is null || current.Status != JobStatus.Running) return false;
+
+            current.AttemptCount++;
+            current.Error = ex.Message.Length > 4000 ? ex.Message[..4000] : ex.Message;
+            var terminal = current.AttemptCount >= JobRetryPolicy.MaxAttempts;
+            if (terminal)
+            {
+                current.Status = JobStatus.Failed;
+                current.CompletedAtUtc = DateTime.UtcNow;
+            }
+            else
+            {
+                current.Status = JobStatus.Pending;
+                current.StartedAtUtc = null;
+                current.Progress = 0;
+                current.Stage = "Retry scheduled";
+                errorDb.OutboxMessages.Add(OutboxMessage.Create(OutboxKinds.Prediction, jobId,
+                    JsonSerializer.Serialize(new SubmitPredictionCommand(jobId)),
+                    DateTime.UtcNow.Add(JobRetryPolicy.Delay(current.AttemptCount))));
+            }
+            await errorDb.SaveChangesAsync();
+            await tx.CommitAsync();
+            return terminal;
         }
         catch (Exception persistEx)
         {
-            // Даже пометить Failed не удалось — пусть сообщение уйдёт в retry-очередь MassTransit.
-            _logger.LogCritical(persistEx, "Failed to mark prediction job {JobId} as Failed", jobId);
+            _logger.LogCritical(persistEx, "Failed to schedule prediction job {JobId} retry", jobId);
             throw;
         }
     }

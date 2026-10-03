@@ -3,11 +3,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Experimento.Infrastructure.Data;
 using Experimento.Infrastructure.Simulations;
+using System.Text.Json;
 
 namespace Experimento.Infrastructure.Messaging;
 
 /// <summary>
-/// Consumes simulation jobs: runs the stress-test engine and persists ranked candidates.
+/// Обрабатывает симуляцию и сохраняет кандидатов с итоговыми оценками.
 /// </summary>
 public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
 {
@@ -30,14 +31,26 @@ public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
     public async Task Consume(ConsumeContext<SubmitSimulationCommand> context)
     {
         var jobId = context.Message.JobId;
-        var job = await _db.SimulationJobs.FindAsync([jobId]);
-        if (job is null || job.Status == JobStatus.Completed) return;
-        if (await _db.SimulationResults.AnyAsync(r => r.JobId == jobId)) return;
+        var claimed = await _db.SimulationJobs
+            .Where(j => j.Id == jobId && j.Status == JobStatus.Pending)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(j => j.Status, JobStatus.Running)
+                .SetProperty(j => j.StartedAtUtc, DateTime.UtcNow), context.CancellationToken);
+        if (claimed == 0) return;
+        var job = await _db.SimulationJobs.FindAsync([jobId], context.CancellationToken);
+        if (job is null) return;
 
         try
         {
-            job.Status = JobStatus.Running;
-            job.StartedAtUtc = DateTime.UtcNow;
+            if (await _db.SimulationResults.AnyAsync(r => r.JobId == jobId, context.CancellationToken))
+            {
+                job.Status = JobStatus.Completed;
+                job.Progress = 100;
+                job.CompletedAtUtc = DateTime.UtcNow;
+                await _db.SaveChangesAsync(context.CancellationToken);
+                return;
+            }
+
             job.Progress = 5;
             await _db.SaveChangesAsync();
             await _notifier.PublishProgressAsync("simulation", jobId, 5, "Loading formulation");
@@ -70,7 +83,7 @@ public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
             _db.SimulationResults.Add(result);
             await _db.SaveChangesAsync(context.CancellationToken);
 
-            // Persist top 50 candidates
+            // Сохраняем 50 лучших кандидатов.
             var addedCandidates = new List<SimulationCandidate>();
             foreach (var c in runResult.RankedCandidates.Take(50))
             {
@@ -97,30 +110,55 @@ public class SimulationConsumer : IConsumer<SubmitSimulationCommand>
 
             await _notifier.PublishCompletedAsync("simulation", jobId);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Simulation job {JobId} failed", jobId);
-            await MarkJobFailedAsync(jobId, ex);
-            await _notifier.PublishFaultedAsync("simulation", jobId, "Simulation failed. Please retry or contact support.");
+            if (await ScheduleRetryOrFailAsync(jobId, ex))
+                await _notifier.PublishFaultedAsync("simulation", jobId, "Simulation failed. Please retry or contact support.");
         }
     }
 
-    /// <summary>Пометка Failed через отдельный контекст (см. PredictionConsumer.MarkJobFailedAsync).</summary>
-    private async Task MarkJobFailedAsync(Guid jobId, Exception ex)
+    /// <summary>Через отдельный контекст назначает повтор либо окончательную ошибку.</summary>
+    private async Task<bool> ScheduleRetryOrFailAsync(Guid jobId, Exception ex)
     {
         try
         {
             await using var errorDb = await _dbFactory.CreateDbContextAsync();
-            await errorDb.SimulationJobs
-                .Where(j => j.Id == jobId && j.Status != JobStatus.Completed)
-                .ExecuteUpdateAsync(s => s
-                    .SetProperty(j => j.Status, JobStatus.Failed)
-                    .SetProperty(j => j.Error, ex.Message.Length > 4000 ? ex.Message[..4000] : ex.Message)
-                    .SetProperty(j => j.CompletedAtUtc, DateTime.UtcNow));
+            await using var tx = await errorDb.Database.BeginTransactionAsync();
+            var rows = await errorDb.SimulationJobs
+                .FromSqlInterpolated($@"SELECT * FROM ""SimulationJobs"" WHERE ""Id"" = {jobId} FOR UPDATE")
+                .ToListAsync();
+            var current = rows.SingleOrDefault();
+            if (current is null || current.Status != JobStatus.Running) return false;
+
+            current.AttemptCount++;
+            current.Error = ex.Message.Length > 4000 ? ex.Message[..4000] : ex.Message;
+            var terminal = current.AttemptCount >= JobRetryPolicy.MaxAttempts;
+            if (terminal)
+            {
+                current.Status = JobStatus.Failed;
+                current.CompletedAtUtc = DateTime.UtcNow;
+            }
+            else
+            {
+                current.Status = JobStatus.Pending;
+                current.StartedAtUtc = null;
+                current.Progress = 0;
+                errorDb.OutboxMessages.Add(OutboxMessage.Create(OutboxKinds.Simulation, jobId,
+                    JsonSerializer.Serialize(new SubmitSimulationCommand(jobId)),
+                    DateTime.UtcNow.Add(JobRetryPolicy.Delay(current.AttemptCount))));
+            }
+            await errorDb.SaveChangesAsync();
+            await tx.CommitAsync();
+            return terminal;
         }
         catch (Exception persistEx)
         {
-            _logger.LogCritical(persistEx, "Failed to mark simulation job {JobId} as Failed", jobId);
+            _logger.LogCritical(persistEx, "Failed to schedule simulation job {JobId} retry", jobId);
             throw;
         }
     }

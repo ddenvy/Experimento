@@ -3,11 +3,12 @@ using Microsoft.EntityFrameworkCore;
 using Microsoft.Extensions.Logging;
 using Experimento.Infrastructure.Data;
 using Experimento.Infrastructure.Knowledge;
+using System.Text.Json;
 
 namespace Experimento.Infrastructure.Messaging;
 
 /// <summary>
-/// Consumes document ingestion commands: chunks content and embeds each chunk.
+/// Разбивает документ на фрагменты и строит векторы для каждого фрагмента.
 /// </summary>
 public class DocumentIngestionConsumer : IConsumer<IngestDocumentCommand>
 {
@@ -30,30 +31,24 @@ public class DocumentIngestionConsumer : IConsumer<IngestDocumentCommand>
     public async Task Consume(ConsumeContext<IngestDocumentCommand> context)
     {
         var docId = context.Message.DocumentId;
-        var doc = await _db.KnowledgeDocuments.FindAsync([docId]);
+        var claimed = await _db.KnowledgeDocuments
+            .Where(d => d.Id == docId && d.Status == KnowledgeStatus.Pending)
+            .ExecuteUpdateAsync(s => s
+                .SetProperty(d => d.Status, KnowledgeStatus.Processing)
+                .SetProperty(d => d.StartedAtUtc, DateTime.UtcNow), context.CancellationToken);
+        if (claimed == 0) return;
+        var doc = await _db.KnowledgeDocuments.FindAsync([docId], context.CancellationToken);
         if (doc is null) return;
-        if (doc.Status == KnowledgeStatus.Ready) return; // повторная доставка уже обработанного документа
 
         try
         {
-            doc.Status = KnowledgeStatus.Processing;
-            await _db.SaveChangesAsync();
-
             var content = context.Message.Content;
             if (string.IsNullOrWhiteSpace(content))
-            {
-                doc.Status = KnowledgeStatus.Failed;
-                await _db.SaveChangesAsync();
-                return;
-            }
+                throw new InvalidOperationException("Document content is empty.");
 
             var chunks = _chunking.Chunk(content);
             if (chunks.Count == 0)
-            {
-                doc.Status = KnowledgeStatus.Failed;
-                await _db.SaveChangesAsync();
-                return;
-            }
+                throw new InvalidOperationException("Document has no indexable chunks.");
 
             // Эмбеддинги строятся одним пакетом — один сетевой вызов вместо N.
             var vectors = await _embedding.EmbedBatchAsync(chunks, context.CancellationToken);
@@ -81,26 +76,49 @@ public class DocumentIngestionConsumer : IConsumer<IngestDocumentCommand>
             await _db.SaveChangesAsync(context.CancellationToken);
             await tx.CommitAsync(context.CancellationToken);
         }
+        catch (OperationCanceledException) when (context.CancellationToken.IsCancellationRequested)
+        {
+            throw;
+        }
         catch (Exception ex)
         {
             _logger.LogError(ex, "Document {DocumentId} ingestion failed", docId);
-            await MarkFailedAsync(docId);
+            await ScheduleRetryOrFailAsync(context.Message);
         }
     }
 
-    /// <summary>Пометка Failed через отдельный контекст (см. PredictionConsumer.MarkJobFailedAsync).</summary>
-    private async Task MarkFailedAsync(Guid docId)
+    /// <summary>Сохраняет повтор вместе с состоянием документа в одной транзакции.</summary>
+    private async Task ScheduleRetryOrFailAsync(IngestDocumentCommand command)
     {
         try
         {
             await using var errorDb = await _dbFactory.CreateDbContextAsync();
-            await errorDb.KnowledgeDocuments
-                .Where(d => d.Id == docId && d.Status != KnowledgeStatus.Ready)
-                .ExecuteUpdateAsync(s => s.SetProperty(d => d.Status, KnowledgeStatus.Failed));
+            await using var tx = await errorDb.Database.BeginTransactionAsync();
+            var rows = await errorDb.KnowledgeDocuments
+                .FromSqlInterpolated($@"SELECT * FROM ""KnowledgeDocuments"" WHERE ""Id"" = {command.DocumentId} FOR UPDATE")
+                .ToListAsync();
+            var current = rows.SingleOrDefault();
+            if (current is null || current.Status != KnowledgeStatus.Processing) return;
+
+            current.AttemptCount++;
+            if (current.AttemptCount >= JobRetryPolicy.MaxAttempts)
+            {
+                current.Status = KnowledgeStatus.Failed;
+            }
+            else
+            {
+                current.Status = KnowledgeStatus.Pending;
+                current.StartedAtUtc = null;
+                errorDb.OutboxMessages.Add(OutboxMessage.Create(OutboxKinds.Document, command.DocumentId,
+                    JsonSerializer.Serialize(command),
+                    DateTime.UtcNow.Add(JobRetryPolicy.Delay(current.AttemptCount))));
+            }
+            await errorDb.SaveChangesAsync();
+            await tx.CommitAsync();
         }
         catch (Exception persistEx)
         {
-            _logger.LogCritical(persistEx, "Failed to mark document {DocumentId} as Failed", docId);
+            _logger.LogCritical(persistEx, "Failed to schedule document {DocumentId} retry", command.DocumentId);
             throw;
         }
     }

@@ -2,9 +2,9 @@ name: CI
 
 on:
   push:
-    branches: [main]
+    branches: [master]
   pull_request:
-    branches: [main]
+    branches: [master]
 
 jobs:
   backend:
@@ -94,9 +94,12 @@ jobs:
         run: npm ci
         working-directory: frontend
 
-      - name: npm audit (high and critical)
-        # Гейт по известным уязвимостям зависимостей; devDependencies тоже учитываются.
-        run: npm audit --audit-level=high
+      - name: Audit dependencies
+        # Блокируем high в runtime-зависимостях и critical во всём дереве.
+        # High в dev-пути пока не блокируем: транзитивный braces не имеет совместимого исправления.
+        run: |
+          npm audit --omit=dev --audit-level=high
+          npm audit --audit-level=critical
         working-directory: frontend
 
       - name: Typecheck
@@ -113,6 +116,62 @@ jobs:
         env:
           NEXT_PUBLIC_API_URL: http://localhost:5126/api
 
-      # Playwright e2e в CI не запускается: им нужен полный docker-compose стек
-      # (Postgres + RabbitMQ + backend + frontend) и внешние API (PubChem/Gemini).
-      # E2E остаётся локальным гейтом перед мержем.
+  e2e:
+    name: Browser smoke tests
+    runs-on: ubuntu-latest
+    timeout-minutes: 30
+    env:
+      JWT_KEY: ci-only-experimento-jwt-signing-key-0123456789abcdef
+      COMPOSE_PROJECT_NAME: experimento-ci
+
+    steps:
+      - uses: actions/checkout@v4
+
+      - name: Setup Node 22
+        uses: actions/setup-node@v4
+        with:
+          node-version: '22'
+          cache: npm
+          cache-dependency-path: frontend/package-lock.json
+
+      - name: Install browser test dependencies
+        run: npm ci
+        working-directory: frontend
+
+      - name: Install Chromium
+        run: npx playwright install --with-deps chromium
+        working-directory: frontend
+
+      - name: Start the application stack
+        run: docker compose -f docker-compose.yml -f .github/compose.ci.yml up -d --build
+
+      - name: Wait for application readiness
+        run: |
+          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 2 --max-time 10 http://localhost:5126/health
+          curl --fail --silent --show-error --retry 30 --retry-connrefused --retry-delay 2 --max-time 10 http://localhost:3000/
+
+      - name: Seed the local chemical catalog
+        run: docker compose -f docker-compose.yml -f .github/compose.ci.yml exec -T postgres psql -v ON_ERROR_STOP=1 -U experimento -d experimento < .github/ci/seed-catalog.sql
+
+      - name: Run browser smoke tests
+        run: npm run test:e2e:ci
+        working-directory: frontend
+
+      - name: Show container logs on failure
+        if: failure()
+        run: docker compose -f docker-compose.yml -f .github/compose.ci.yml logs --no-color --tail=200
+
+      - name: Upload browser traces and screenshots on failure
+        if: failure()
+        uses: actions/upload-artifact@v4
+        with:
+          name: playwright-failures
+          path: |
+            frontend/test-results/
+            frontend/playwright-report/
+          if-no-files-found: ignore
+          retention-days: 7
+
+      - name: Stop the test stack
+        if: always()
+        run: docker compose -f docker-compose.yml -f .github/compose.ci.yml down -v

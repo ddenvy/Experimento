@@ -4,7 +4,7 @@ using Npgsql;
 namespace Experimento.Infrastructure.Data;
 
 /// <summary>
-/// Append-only audit trail with SHA-256 hash-chain integrity verification.
+/// Неизменяемый журнал с цепочкой SHA-256 и проверкой целостности.
 /// </summary>
 public class AuditTrailRepository : IAuditTrail
 {
@@ -17,9 +17,19 @@ public class AuditTrailRepository : IAuditTrail
     public async Task<AuditEntry> AppendAsync(Guid? actorUserId, string action, string entityType,
         string? entityId, string payloadJson, CancellationToken cancellationToken = default)
     {
-        // Всё добавление сериализуется транзакционным advisory-блокировкой PostgreSQL,
-        // чтобы параллельные запросы не получили один и тот же PreviousHash и не разорвали цепочку.
+        if (_db.Database.CurrentTransaction is not null)
+            return await AppendInTransactionAsync(actorUserId, action, entityType, entityId, payloadJson, cancellationToken);
+
         await using var transaction = await _db.Database.BeginTransactionAsync(cancellationToken);
+        var entry = await AppendInTransactionAsync(actorUserId, action, entityType, entityId, payloadJson, cancellationToken);
+        await transaction.CommitAsync(cancellationToken);
+        return entry;
+    }
+
+    private async Task<AuditEntry> AppendInTransactionAsync(Guid? actorUserId, string action, string entityType,
+        string? entityId, string payloadJson, CancellationToken cancellationToken)
+    {
+        // Блокировка действует до коммита бизнес-операции и не допускает разветвления цепочки.
         await _db.Database.ExecuteSqlRawAsync("SELECT pg_advisory_xact_lock(@key)", [new NpgsqlParameter("key", AdvisoryLockKey)], cancellationToken);
 
         var lastHash = await _db.AuditEntries
@@ -27,19 +37,19 @@ public class AuditTrailRepository : IAuditTrail
             .Select(e => e.EntryHash)
             .FirstOrDefaultAsync(cancellationToken) ?? string.Empty;
 
-        // Id присваивается identity-колонкой после save: сначала считаем хеш с заглушкой, затем пересчитываем.
-        var entry = AuditEntry.Create(0, actorUserId, action, entityType, entityId, payloadJson, lastHash);
-        _db.AuditEntries.Add(entry);
-        await _db.SaveChangesAsync(cancellationToken);
-
-        // Пересчёт хеша с реальным identity-Id.
-        var actual = AuditEntry.Create(entry.Id, actorUserId, action, entityType, entityId, payloadJson, lastHash);
-        entry.PayloadHash = actual.PayloadHash;
-        entry.EntryHash = actual.EntryHash;
-        entry.TimestampUtc = actual.TimestampUtc;
-        await _db.SaveChangesAsync(cancellationToken);
-
-        await transaction.CommitAsync(cancellationToken);
+        // Sequence выдает Id до вставки: запись с окончательным хешем создается один раз.
+        var id = await _db.Database.SqlQueryRaw<long>(
+                "SELECT nextval(pg_get_serial_sequence('\"AuditEntries\"', 'Id')) AS \"Value\"")
+            .SingleAsync(cancellationToken);
+        var entry = AuditEntry.Create(id, actorUserId, action, entityType, entityId, payloadJson, lastHash);
+        await _db.Database.ExecuteSqlInterpolatedAsync($@"
+            INSERT INTO ""AuditEntries""
+                (""Id"", ""TimestampUtc"", ""ActorUserId"", ""Action"", ""EntityType"", ""EntityId"",
+                 ""PayloadJson"", ""PayloadHash"", ""PreviousHash"", ""EntryHash"")
+            OVERRIDING SYSTEM VALUE
+            VALUES ({entry.Id}, {entry.TimestampUtc}, {entry.ActorUserId}, {entry.Action}, {entry.EntityType},
+                    {entry.EntityId}, {entry.PayloadJson}, {entry.PayloadHash}, {entry.PreviousHash},
+                    {entry.EntryHash})", cancellationToken);
         return entry;
     }
 
@@ -79,7 +89,7 @@ public class AuditTrailRepository : IAuditTrail
     public async Task<IReadOnlyList<AuditEntry>> GetTrailAsync(string? entityType, string? entityId,
         int skip, int take, CancellationToken cancellationToken = default)
     {
-        var query = _db.AuditEntries.AsQueryable();
+        var query = _db.AuditEntries.AsNoTracking().AsQueryable();
         if (!string.IsNullOrEmpty(entityType))
             query = query.Where(e => e.EntityType == entityType);
         if (!string.IsNullOrEmpty(entityId))

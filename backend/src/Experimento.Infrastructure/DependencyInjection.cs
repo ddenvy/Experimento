@@ -80,6 +80,10 @@ public static class DependencyInjection
             });
         });
 
+        // Сначала запускается шина, затем отправитель outbox и восстановитель задач.
+        services.AddHostedService<Messaging.OutboxDispatcher>();
+        services.AddHostedService<Messaging.StalledJobRecovery>();
+
         return services;
     }
 }

@@ -16,6 +16,7 @@ public class SimulationsController : BaseController
         => Ok(await Mediator.Send(new ListSimulationRunsQuery(versionId, UserId)));
 
     [HttpPost("formulation-versions/{versionId:guid}/simulations")]
+    [AtomicAudit]
     public async Task<IActionResult> Submit(Guid versionId, [FromBody] SubmitSimulationRequest? request)
     {
         var options = request ?? new SubmitSimulationRequest();

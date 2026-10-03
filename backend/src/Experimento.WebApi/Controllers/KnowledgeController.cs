@@ -20,6 +20,7 @@ public class KnowledgeController : BaseController
         => _extractor = extractor;
 
     [HttpPost("documents")]
+    [AtomicAudit]
     public async Task<IActionResult> Upload([FromBody] UploadDocumentCommand cmd)
     {
         var result = await Mediator.Send(cmd with { UploadedBy = UserId });
@@ -37,6 +38,7 @@ public class KnowledgeController : BaseController
     /// чанкинга и эмбеддинга.
     /// </summary>
     [HttpPost("documents/upload")]
+    [AtomicAudit]
     [RequestSizeLimit(MaxUploadBytes)]
     [RequestFormLimits(MultipartBodyLengthLimit = MaxUploadBytes)]
     public async Task<IActionResult> UploadFile(

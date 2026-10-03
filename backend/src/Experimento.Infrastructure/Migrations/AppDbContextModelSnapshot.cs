@@ -69,6 +69,9 @@ namespace Experimento.Infrastructure.Migrations
 
                     b.HasIndex("ActorUserId");
 
+                    b.HasIndex("PreviousHash")
+                        .IsUnique();
+
                     b.HasIndex("EntityType", "EntityId");
 
                     b.ToTable("AuditEntries");
@@ -326,6 +329,9 @@ namespace Experimento.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
                     b.Property<Guid?>("ProjectId")
                         .HasColumnType("uuid");
 
@@ -335,6 +341,9 @@ namespace Experimento.Infrastructure.Migrations
 
                     b.Property<int>("SourceType")
                         .HasColumnType("integer");
+
+                    b.Property<DateTime?>("StartedAtUtc")
+                        .HasColumnType("timestamp with time zone");
 
                     b.Property<global::Experimento.Domain.Enums.KnowledgeStatus>("Status")
                         .HasConversion<string>()
@@ -353,6 +362,8 @@ namespace Experimento.Infrastructure.Migrations
                     b.HasKey("Id");
 
                     b.HasIndex("ProjectId");
+
+                    b.HasIndex("Status", "StartedAtUtc");
 
                     b.ToTable("KnowledgeDocuments");
                 });
@@ -387,11 +398,61 @@ namespace Experimento.Infrastructure.Migrations
                     b.ToTable("ModelRegistrations");
                 });
 
+            modelBuilder.Entity("Experimento.Domain.Entities.OutboxMessage", b =>
+                {
+                    b.Property<Guid>("Id")
+                        .ValueGeneratedOnAdd()
+                        .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
+                    b.Property<DateTime>("AvailableAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<DateTime>("CreatedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<Guid>("EntityId")
+                        .HasColumnType("uuid");
+
+                    b.Property<string>("Kind")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<string>("LastError")
+                        .HasColumnType("text");
+
+                    b.Property<Guid?>("LeaseId")
+                        .HasColumnType("uuid");
+
+                    b.Property<DateTime?>("LeaseUntilUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.Property<string>("PayloadJson")
+                        .IsRequired()
+                        .HasColumnType("text");
+
+                    b.Property<DateTime?>("PublishedAtUtc")
+                        .HasColumnType("timestamp with time zone");
+
+                    b.HasKey("Id");
+
+                    b.HasIndex("Kind", "EntityId");
+
+                    b.HasIndex("PublishedAtUtc", "AvailableAtUtc", "LeaseUntilUtc");
+
+                    b.ToTable("OutboxMessages");
+                });
+
             modelBuilder.Entity("Experimento.Domain.Entities.PredictionJob", b =>
                 {
                     b.Property<Guid>("Id")
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
+
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
 
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
@@ -421,6 +482,8 @@ namespace Experimento.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Status", "StartedAtUtc");
 
                     b.HasIndex("VersionId", "RequestedBy");
 
@@ -623,6 +686,9 @@ namespace Experimento.Infrastructure.Migrations
                         .ValueGeneratedOnAdd()
                         .HasColumnType("uuid");
 
+                    b.Property<int>("AttemptCount")
+                        .HasColumnType("integer");
+
                     b.Property<DateTime?>("CompletedAtUtc")
                         .HasColumnType("timestamp with time zone");
 
@@ -652,6 +718,8 @@ namespace Experimento.Infrastructure.Migrations
                         .HasColumnType("uuid");
 
                     b.HasKey("Id");
+
+                    b.HasIndex("Status", "StartedAtUtc");
 
                     b.HasIndex("VersionId", "RequestedBy");
 

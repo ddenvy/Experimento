@@ -1,6 +1,10 @@
 using System.Net.Http.Headers;
 using System.Net.Http.Json;
 using System.Text.Json;
+using Experimento.Application.Messaging;
+using Experimento.Infrastructure.Data;
+using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.DependencyInjection;
 using Xunit;
 
 namespace Experimento.WebApi.Tests;
@@ -116,6 +120,13 @@ public class FullFlowTests : IClassFixture<ApiFixture>
             }
         }
         Assert.NotNull(result);
+        using (var scope = _factory.Services.CreateScope())
+        {
+            var db = scope.ServiceProvider.GetRequiredService<AppDbContext>();
+            var outboxJobId = Guid.Parse(jobId);
+            Assert.True(await db.OutboxMessages.AnyAsync(m =>
+                m.Kind == OutboxKinds.Prediction && m.EntityId == outboxJobId && m.PublishedAtUtc != null));
+        }
         Assert.InRange(result.SuccessProbability, 0.0, 1.0);
         Assert.False(string.IsNullOrEmpty(result.SideRiskLevel));
 

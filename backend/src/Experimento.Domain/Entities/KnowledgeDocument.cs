@@ -16,6 +16,8 @@ public class KnowledgeDocument
     public KnowledgeStatus Status { get; set; } = KnowledgeStatus.Pending;
     public Guid UploadedBy { get; set; }
     public DateTime UploadedAtUtc { get; set; } = DateTime.UtcNow;
+    public DateTime? StartedAtUtc { get; set; }
+    public int AttemptCount { get; set; }
 
     public ICollection<KnowledgeChunk> Chunks { get; set; } = new List<KnowledgeChunk>();
 }

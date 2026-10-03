@@ -16,6 +16,7 @@ public class PredictionsController : BaseController
         => Ok(await Mediator.Send(new ListPredictionRunsQuery(versionId, UserId)));
 
     [HttpPost("formulation-versions/{versionId:guid}/predictions")]
+    [AtomicAudit]
     public async Task<IActionResult> Submit(Guid versionId)
     {
         var result = await Mediator.Send(new SubmitPredictionCommand(versionId, UserId));
@@ -32,6 +33,7 @@ public class PredictionsController : BaseController
         => Ok(await Mediator.Send(new GetPredictionResultQuery(jobId, UserId)));
 
     [HttpPost("prediction-results/{resultId:guid}/review")]
+    [AtomicAudit]
     public async Task<IActionResult> Review(Guid resultId, [FromBody] SubmitReviewCommand cmd)
     {
         var result = await Mediator.Send(cmd with { ResultId = resultId, ReviewerUserId = UserId });
@@ -40,6 +42,7 @@ public class PredictionsController : BaseController
     }
 
     [HttpPost("prediction-results/{resultId:guid}/outcome")]
+    [AtomicAudit]
     public async Task<IActionResult> RecordOutcome(Guid resultId, [FromBody] RecordOutcomeCommand cmd)
     {
         var result = await Mediator.Send(cmd with { ResultId = resultId, RecordedBy = UserId });

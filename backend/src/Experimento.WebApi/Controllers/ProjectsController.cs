@@ -20,6 +20,7 @@ public class ProjectsController : BaseController
         => Ok(await Mediator.Send(new GetProjectQuery(id, UserId)));
 
     [HttpPost]
+    [AtomicAudit]
     public async Task<IActionResult> Create([FromBody] CreateProjectCommand cmd)
     {
         var result = await Mediator.Send(cmd with { CreatedBy = UserId });
@@ -28,6 +29,7 @@ public class ProjectsController : BaseController
     }
 
     [HttpPut("{id:guid}")]
+    [AtomicAudit]
     public async Task<IActionResult> Update(Guid id, [FromBody] UpdateProjectCommand cmd)
     {
         var result = await Mediator.Send(cmd with { Id = id, UserId = UserId });
@@ -36,6 +38,7 @@ public class ProjectsController : BaseController
     }
 
     [HttpDelete("{id:guid}")]
+    [AtomicAudit]
     public async Task<IActionResult> Delete(Guid id)
     {
         await Mediator.Send(new DeleteProjectCommand(id, UserId));

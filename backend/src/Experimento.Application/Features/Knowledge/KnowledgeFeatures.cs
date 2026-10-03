@@ -1,7 +1,7 @@
 using FluentValidation;
-using MassTransit;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
+using System.Text.Json;
 
 namespace Experimento.Application.Features.Knowledge;
 
@@ -33,10 +33,9 @@ public class SearchKnowledgeValidator : AbstractValidator<SearchKnowledgeQuery>
 public class UploadDocumentHandler : IRequestHandler<UploadDocumentCommand, KnowledgeDocumentDto>
 {
     private readonly IAppDbContext _db;
-    private readonly IPublishEndpoint _publish;
     private readonly ResourceAuthorization _auth;
-    public UploadDocumentHandler(IAppDbContext db, IPublishEndpoint publish, ResourceAuthorization auth)
-        => (_db, _publish, _auth) = (db, publish, auth);
+    public UploadDocumentHandler(IAppDbContext db, ResourceAuthorization auth)
+        => (_db, _auth) = (db, auth);
 
     public async Task<KnowledgeDocumentDto> Handle(UploadDocumentCommand request, CancellationToken ct)
     {
@@ -55,11 +54,11 @@ public class UploadDocumentHandler : IRequestHandler<UploadDocumentCommand, Know
             Status = KnowledgeStatus.Pending
         };
         _db.KnowledgeDocuments.Add(doc);
+        _db.OutboxMessages.Add(OutboxMessage.Create(OutboxKinds.Document, doc.Id,
+            JsonSerializer.Serialize(new Messaging.IngestDocumentCommand(doc.Id, request.Content))));
         await _db.SaveChangesAsync(ct);
 
-        // Чанкинг и эмбеддинги строит консьюмер; сырой контент передаём в сообщении,
-        // чтобы не вставлять временную строку с пустым вектором (vector(1536) NOT NULL).
-        await _publish.Publish(new Messaging.IngestDocumentCommand(doc.Id, request.Content), ct);
+        // Контент хранится в outbox до доставки: после сбоя его можно передать повторно.
 
         return new KnowledgeDocumentDto(doc.Id, doc.Title, doc.SourceType.ToString(), doc.Reference, doc.Status.ToString(), doc.UploadedAtUtc);
     }

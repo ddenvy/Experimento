@@ -4,7 +4,7 @@ using System.Text;
 namespace Experimento.Domain.Entities;
 
 /// <summary>
-/// An append-only audit entry linked to the previous one by a SHA-256 hash chain.
+/// Неизменяемая запись, связанная с предыдущей цепочкой хешей SHA-256.
 /// </summary>
 public class AuditEntry
 {
@@ -20,15 +20,14 @@ public class AuditEntry
     public string EntryHash { get; set; } = string.Empty;
 
     /// <summary>
-    /// Creates a new audit entry with a deterministic hash linked to the previous entry.
+    /// Создает запись с хешем, связанным с предыдущей записью.
     /// </summary>
     public static AuditEntry Create(long id, Guid? actorUserId, string action, string entityType,
         string? entityId, string payloadJson, string previousHash)
     {
         var payloadHash = ComputeSha256Hex(payloadJson);
         var now = DateTime.UtcNow;
-        // Truncate to microsecond precision to match PostgreSQL timestamptz storage,
-        // otherwise the hash (computed with 7-digit ticks) won't survive a DB round-trip.
+        // Точность PostgreSQL равна микросекунде: одинаковое время нужно при проверке хеша.
         var timestamp = new DateTime(now.Ticks - (now.Ticks % TimeSpan.TicksPerMicrosecond), DateTimeKind.Utc);
         var raw = $"{id}|{timestamp:O}|{actorUserId}|{action}|{entityType}|{entityId}|{payloadHash}|{previousHash}";
         var entryHash = ComputeSha256Hex(raw);
@@ -49,8 +48,7 @@ public class AuditEntry
     }
 
     /// <summary>
-    /// Recomputes the entry hash and returns true if it matches the stored value.
-    /// Also verifies that PayloadHash matches the actual PayloadJson content.
+    /// Сверяет хеш записи и хеш содержимого с сохраненными значениями.
     /// </summary>
     public bool IsHashValid()
     {

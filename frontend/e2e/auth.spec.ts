@@ -1,13 +1,12 @@
 import { test, expect } from "@playwright/test";
 
 /**
- * End-to-end tests for the authentication flow.
- * Uses the seeded test user apple@apple.com / Test12345!
+ * Проверки входа с тестовой учетной записью apple@apple.com / Test12345!.
  */
 const TEST_EMAIL = "apple@apple.com";
 const TEST_PASSWORD = "Test12345!";
 
-test.describe("Authentication", () => {
+test.describe("Authentication", { tag: "@ci" }, () => {
   test("login page renders the sign-in form", async ({ page }) => {
     await page.goto("/login");
     await expect(page.getByRole("heading", { name: "Sign in to Experimento" })).toBeVisible();

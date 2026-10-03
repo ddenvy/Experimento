@@ -48,7 +48,7 @@ test.describe("Authenticated workflow", () => {
     await expect(page).toHaveURL(/\/projects$/);
   });
 
-  test("golden path: project → formulation → version → prediction → simulation", async ({ page }) => {
+  test("golden path: project → formulation → version → prediction → simulation", { tag: "@ci" }, async ({ page }) => {
     test.setTimeout(90_000);
     const marker = Date.now();
     const projectName = `E2E Project ${marker}`;
@@ -463,7 +463,13 @@ test.describe("Authenticated workflow", () => {
     expect(overflow.scrollWidth).toBeLessThanOrEqual(overflow.innerWidth);
   });
 
-  test("audit trail page lists entries and supports integrity check", async ({ page }) => {
+  test("audit trail page lists entries and supports integrity check", { tag: "@ci" }, async ({ page, request }) => {
+    const response = await request.post("http://localhost:5126/api/projects", {
+      data: { name: `Audit ${Date.now()}`, description: "Проверка журнала аудита" },
+      headers: { Authorization: `Bearer ${token}` },
+    });
+    expect(response.ok()).toBeTruthy();
+
     await page.goto("/audit");
     await expect(page.getByRole("heading", { name: "Audit Trail" })).toBeVisible();
     await expect(page.locator("tbody tr").first()).toBeVisible({ timeout: 15000 });

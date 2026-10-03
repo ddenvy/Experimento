@@ -6,6 +6,7 @@ using Experimento.Application.DTOs;
 using Experimento.Domain.Entities;
 using Experimento.Domain.Enums;
 using Microsoft.EntityFrameworkCore;
+using Microsoft.Extensions.Configuration;
 using Microsoft.Extensions.Caching.Memory;
 using Microsoft.Extensions.Logging;
 
@@ -23,18 +24,20 @@ public class PubChemCatalogService : IChemicalCatalogService
     private readonly IAppDbContext _db;
     private readonly IMemoryCache _cache;
     private readonly ILogger<PubChemCatalogService> _logger;
+    private readonly bool _localOnly;
 
     private static readonly TimeSpan SuggestCacheTtl = TimeSpan.FromMinutes(30);
     private static readonly Regex CasPattern = new(@"^\d{2,7}-\d{2}-\d$", RegexOptions.Compiled);
     private const string PropertyFields = "Title,MolecularFormula,MolecularWeight,CanonicalSMILES";
 
     public PubChemCatalogService(IHttpClientFactory httpFactory, IAppDbContext db,
-        IMemoryCache cache, ILogger<PubChemCatalogService> logger)
+        IMemoryCache cache, ILogger<PubChemCatalogService> logger, IConfiguration config)
     {
         _httpFactory = httpFactory;
         _db = db;
         _cache = cache;
         _logger = logger;
+        _localOnly = config.GetValue<bool>("ChemicalCatalog:LocalOnly");
     }
 
     public async Task<IReadOnlyList<ChemicalSuggestion>> SuggestAsync(string query, int limit, CancellationToken cancellationToken = default)
@@ -46,6 +49,10 @@ public class PubChemCatalogService : IChemicalCatalogService
         var cacheKey = $"pubchem:suggest:v2:{limit}:{query.ToLowerInvariant()}";
         if (_cache.TryGetValue<List<ChemicalSuggestion>>(cacheKey, out var cached) && cached is not null)
             return cached;
+
+        // В тестовом окружении используем только заранее заполненный каталог.
+        if (_localOnly)
+            return await SearchLocalCatalogAsync(query, limit, cancellationToken);
 
         var kind = ChemicalQueryClassifier.Classify(query);
 
@@ -98,11 +105,14 @@ public class PubChemCatalogService : IChemicalCatalogService
             .FirstOrDefaultAsync(e => e.CanonicalName.ToLower() == nameLower, cancellationToken);
         if (cachedByName is not null)
         {
+            if (_localOnly) return ToDto(cachedByName);
             // Запись могла быть создана до появления структурных полей — дозаполним по CID.
             return cachedByName.Smiles is not null && cachedByName.Formula is not null
                 ? ToDto(cachedByName)
                 : await ResolveByCidAsync(cachedByName.PubChemCid, cancellationToken);
         }
+
+        if (_localOnly) return null;
 
         // 2. Запрос свойств в PubChem по названию (namespace name понимает синонимы и CAS).
         var propsUrl = $"/rest/pug/compound/name/{Uri.EscapeDataString(name)}/property/{PropertyFields}/JSON";
@@ -118,6 +128,7 @@ public class PubChemCatalogService : IChemicalCatalogService
 
         var existing = await _db.ChemicalCatalog
             .FirstOrDefaultAsync(e => e.PubChemCid == cid, cancellationToken);
+        if (_localOnly) return existing is null ? null : ToDto(existing);
         if (existing is not null && existing.Smiles is not null && existing.Formula is not null && existing.MolarMass > 0)
             return ToDto(existing);
 

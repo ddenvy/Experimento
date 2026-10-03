@@ -26,6 +26,7 @@ public class DemoController : BaseController
     /// Идемпотентно: если demo уже есть — возвращает существующий.
     /// </summary>
     [HttpPost("provision")]
+    [AtomicAudit]
     public async Task<IActionResult> Provision(CancellationToken ct)
     {
         var result = await Mediator.Send(new ProvisionDemoDataCommand(UserId), ct);

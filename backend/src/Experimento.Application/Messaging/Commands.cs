@@ -16,3 +16,11 @@ public record SubmitSimulationCommand(Guid JobId);
 /// финальные чанки с векторами (колонка vector(1536) NOT NULL).
 /// </summary>
 public record IngestDocumentCommand(Guid DocumentId, string Content);
+
+/// <summary>Типы сообщений, сохраненных в транзакционном журнале отправки.</summary>
+public static class OutboxKinds
+{
+    public const string Prediction = "prediction";
+    public const string Simulation = "simulation";
+    public const string Document = "document";
+}

@@ -63,9 +63,14 @@ public class ApiFixture : WebApplicationFactory<Program>
 
         foreach (var seed in seeds)
         {
-            if (!db.ChemicalCatalog.Any(e => e.PubChemCid == seed.PubChemCid))
-                db.ChemicalCatalog.Add(seed);
+            // Параллельные фикстуры не должны соревноваться между проверкой и вставкой.
+            db.Database.ExecuteSqlInterpolated($@"
+                INSERT INTO ""ChemicalCatalog""
+                    (""Id"", ""PubChemCid"", ""CanonicalName"", ""CasNumber"", ""Formula"",
+                     ""MolarMass"", ""CachedAtUtc"", ""Smiles"")
+                VALUES ({seed.Id}, {seed.PubChemCid}, {seed.CanonicalName}, {seed.CasNumber}, {seed.Formula},
+                        {seed.MolarMass}, {seed.CachedAtUtc}, {seed.Smiles})
+                ON CONFLICT (""PubChemCid"") DO NOTHING");
         }
-        db.SaveChanges();
     }
 }

@@ -18,6 +18,7 @@ public class SimulationJob
     public DateTime CreatedAtUtc { get; set; } = DateTime.UtcNow;
     public DateTime? StartedAtUtc { get; set; }
     public DateTime? CompletedAtUtc { get; set; }
+    public int AttemptCount { get; set; }
 
     public SimulationResult? Result { get; set; }
 }

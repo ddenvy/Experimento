@@ -1,5 +1,4 @@
 using FluentValidation;
-using MassTransit;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -48,10 +47,9 @@ public class SubmitSimulationValidator : AbstractValidator<SubmitSimulationComma
 public class SubmitSimulationHandler : IRequestHandler<SubmitSimulationCommand, SimulationJobDto>
 {
     private readonly IAppDbContext _db;
-    private readonly IPublishEndpoint _publish;
     private readonly ResourceAuthorization _auth;
-    public SubmitSimulationHandler(IAppDbContext db, IPublishEndpoint publish, ResourceAuthorization auth)
-        => (_db, _publish, _auth) = (db, publish, auth);
+    public SubmitSimulationHandler(IAppDbContext db, ResourceAuthorization auth)
+        => (_db, _auth) = (db, auth);
 
     public async Task<SimulationJobDto> Handle(SubmitSimulationCommand request, CancellationToken ct)
     {
@@ -77,8 +75,9 @@ public class SubmitSimulationHandler : IRequestHandler<SubmitSimulationCommand, 
             Status = JobStatus.Pending
         };
         _db.SimulationJobs.Add(job);
+        _db.OutboxMessages.Add(OutboxMessage.Create(OutboxKinds.Simulation, job.Id,
+            JsonSerializer.Serialize(new Messaging.SubmitSimulationCommand(job.Id))));
         await _db.SaveChangesAsync(ct);
-        await _publish.Publish(new Messaging.SubmitSimulationCommand(job.Id), ct);
         return new SimulationJobDto(job.Id, job.VersionId, job.Status.ToString(), job.Progress, job.CreatedAtUtc);
     }
 }

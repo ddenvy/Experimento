@@ -20,6 +20,7 @@ public class FormulationsController : BaseController
         => Ok(await Mediator.Send(new ListVersionsQuery(id, UserId)));
 
     [HttpPost]
+    [AtomicAudit]
     public async Task<IActionResult> Create([FromBody] CreateFormulationCommand cmd)
     {
         var result = await Mediator.Send(cmd with { UserId = UserId });
@@ -28,6 +29,7 @@ public class FormulationsController : BaseController
     }
 
     [HttpPost("{formulationId:guid}/versions")]
+    [AtomicAudit]
     public async Task<IActionResult> CreateVersion(Guid formulationId, [FromBody] CreateVersionCommand cmd)
     {
         var result = await Mediator.Send(cmd with { FormulationId = formulationId, CreatedBy = UserId });
@@ -70,6 +72,7 @@ public class FormulationsController : BaseController
     /// По ним считается срок годности (t90) с переносом на температуру хранения.
     /// </summary>
     [HttpPost("versions/{versionId:guid}/stability-studies")]
+    [AtomicAudit]
     public async Task<IActionResult> CreateStabilityStudy(Guid versionId, [FromBody] CreateStabilityStudyCommand cmd)
     {
         var result = await Mediator.Send(cmd with { VersionId = versionId, CreatedBy = UserId });
@@ -90,6 +93,7 @@ public class FormulationsController : BaseController
         => Ok(await Mediator.Send(new GetStabilityAssessmentQuery(studyId, UserId)));
 
     [HttpDelete("stability-studies/{studyId:guid}")]
+    [AtomicAudit]
     public async Task<IActionResult> DeleteStabilityStudy(Guid studyId)
     {
         await Mediator.Send(new DeleteStabilityStudyCommand(studyId, UserId));

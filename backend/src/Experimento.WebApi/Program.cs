@@ -38,7 +38,8 @@ builder.Services.AddInfrastructure(config);
 builder.Services.AddAiServices(config);
 
 // Controllers
-builder.Services.AddControllers();
+builder.Services.AddScoped<AuditTransactionFilter>();
+builder.Services.AddControllers(options => options.Filters.AddService<AuditTransactionFilter>());
 builder.Services.AddOpenApi(options => options.AddDocumentTransformer((doc, _, _) =>
 {
     doc.Info.Title = "Experimento API";

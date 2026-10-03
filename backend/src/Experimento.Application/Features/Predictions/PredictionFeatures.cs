@@ -1,5 +1,4 @@
 using FluentValidation;
-using MassTransit;
 using MediatR;
 using Microsoft.EntityFrameworkCore;
 using System.Text.Json;
@@ -18,10 +17,9 @@ public record ListPredictionRunsQuery(Guid VersionId, Guid UserId = default)
 public class SubmitPredictionHandler : IRequestHandler<SubmitPredictionCommand, PredictionJobDto>
 {
     private readonly IAppDbContext _db;
-    private readonly IPublishEndpoint _publish;
     private readonly ResourceAuthorization _auth;
-    public SubmitPredictionHandler(IAppDbContext db, IPublishEndpoint publish, ResourceAuthorization auth)
-        => (_db, _publish, _auth) = (db, publish, auth);
+    public SubmitPredictionHandler(IAppDbContext db, ResourceAuthorization auth)
+        => (_db, _auth) = (db, auth);
 
     public async Task<PredictionJobDto> Handle(SubmitPredictionCommand request, CancellationToken ct)
     {
@@ -35,8 +33,9 @@ public class SubmitPredictionHandler : IRequestHandler<SubmitPredictionCommand, 
             Status = JobStatus.Pending
         };
         _db.PredictionJobs.Add(job);
+        _db.OutboxMessages.Add(OutboxMessage.Create(OutboxKinds.Prediction, job.Id,
+            JsonSerializer.Serialize(new Messaging.SubmitPredictionCommand(job.Id))));
         await _db.SaveChangesAsync(ct);
-        await _publish.Publish(new Messaging.SubmitPredictionCommand(job.Id), ct);
         return new PredictionJobDto(job.Id, job.VersionId, job.Status.ToString(), job.Progress, job.Stage, job.CreatedAtUtc);
     }
 }

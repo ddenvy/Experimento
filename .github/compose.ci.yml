@@ -1,0 +1,10 @@
+services:
+  backend:
+    environment:
+      ASPNETCORE_ENVIRONMENT: Development
+      Seed__TestAdmin: "true"
+      Ai__Provider: none
+      ChemicalCatalog__LocalOnly: "true"
+      RateLimits__AuthPermitPerMinute: "200"
+      RateLimits__ApiTokenLimit: "5000"
+      RateLimits__ApiTokensPerPeriod: "2000"
